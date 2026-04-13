@@ -148,12 +148,12 @@ app/
 ├── config.py            # Configuración por entorno
 ├── extensions.py        # SQLAlchemy, Flask-Login, Bcrypt, CSRF
 ├── logging_config.py    # JSON logging estructurado a stdout
-├── models/              # SQLAlchemy: User, Agent, Session, Message, Run, ToolExecution, OAuthProfile, ScheduledTask
-├── api/                 # Blueprints REST: auth, agents, chat (SSE), runs, oauth, scheduler, metrics
+├── models/              # SQLAlchemy: User, Agent, Session, Message, Run, ToolExecution, OAuthProfile, ScheduledTask, Skill, Tool
+├── api/                 # Blueprints REST: auth, agents, chat (SSE), runs, oauth, scheduler, metrics, skills, tools, subagents
 │   ├── middleware.py    # Decoradores auth_required, admin_required
 │   └── errors.py       # Manejadores de error JSON
-├── dashboard/           # Vistas HTMX: overview, agents, chat, scheduler, metrics
-├── services/            # Lógica de negocio: auth, agent, session, chat, run, oauth, scheduler, metrics, matrix
+├── dashboard/           # Vistas HTMX: overview, agents, chat, scheduler, metrics, skills, tools, topology, subagents
+├── services/            # Lógica de negocio: auth, agent, session, chat, run, oauth, scheduler, metrics, matrix, skill, tool, subagent
 ├── runtime/             # Motor del agente
 │   ├── context_builder.py  # Ensambla system prompt desde workspace + historial
 │   ├── model_client.py     # Wrapper OpenAI SDK con streaming
@@ -162,7 +162,9 @@ app/
 │   └── agent_runner.py     # Loop de razonamiento (máx 10 rondas de tool calls)
 ├── workspace/           # Gestión de ficheros de workspace por agente
 │   ├── manager.py       # CRUD de ficheros, scaffolding
-│   └── loader.py        # Carga SOUL/AGENTS/MEMORY/TOOLS.md
+│   ├── loader.py        # Carga SOUL/AGENTS/MEMORY/TOOLS.md
+│   ├── discovery.py     # Descubrimiento de skills/tools, sync con BD, carga dinámica
+│   └── manifest.py      # Validación de manifiestos JSON
 ├── templates/           # Jinja2 + HTMX
 └── static/              # CSS + JS (chat.js para SSE)
 
@@ -184,6 +186,8 @@ app/worker/
 | `tool_executions` | Registro de cada invocación de tool |
 | `oauth_profiles` | Perfiles OAuth con tokens cifrados (Fernet) |
 | `scheduled_tasks` | Tareas programadas (cron, heartbeat, one-shot) |
+| `skills` | Skills registradas por agente (manifest, estado, fuente) |
+| `tools` | Tools del workspace por agente (manifest, handler, timeout) |
 
 ### Runtime del agente
 
@@ -208,6 +212,8 @@ El flujo de una interacción por chat:
 | `read_workspace_file` | Lee un fichero del workspace del agente |
 | `list_workspace_files` | Lista todos los ficheros del workspace |
 | `get_current_time` | Devuelve fecha y hora UTC actual |
+| `delegate_task` | Delega una tarea a un sub-agente y devuelve el resultado |
+| `list_subagents` | Lista los sub-agentes disponibles para delegación |
 
 ### Workspace de agente
 
@@ -258,6 +264,29 @@ Cada agente tiene un directorio en `/workspaces/<slug>/`:
 - `DELETE /api/scheduled-tasks/:id` — Eliminar
 - `POST /api/scheduled-tasks/:id/toggle` — Activar/desactivar
 
+### Sub-agents
+- `GET /api/agents/:id/subagents` — Listar sub-agentes de un agente
+- `POST /api/agents/:id/subagents` — Crear sub-agente (`{"name": "...", "role": "..."}`)
+- `POST /api/agents/:id/delegate` — Delegar tarea (`{"target_agent_id": 2, "message": "..."}` o `{"target_name": "slug", "message": "..."}`)
+- `GET /api/agents/topology` — Árbol completo de topología de agentes
+- `GET /api/agents/:id/topology` — Subárbol desde un agente
+
+### Skills
+- `GET /api/skills` — Listar skills (filtrable por `agent_id`)
+- `POST /api/skills` — Crear skill (`{"agent_id": 1, "name": "..."}`)
+- `PATCH /api/skills/:id` — Actualizar
+- `POST /api/skills/:id/reload` — Recargar manifest desde filesystem
+- `POST /api/skills/:id/toggle` — Activar/desactivar
+- `POST /api/skills/sync` — Sincronizar skills del workspace con BD
+
+### Tools (workspace)
+- `GET /api/tools` — Listar tools (filtrable por `agent_id`)
+- `POST /api/tools` — Crear tool (`{"agent_id": 1, "name": "..."}`)
+- `PATCH /api/tools/:id` — Actualizar
+- `POST /api/tools/:id/toggle` — Activar/desactivar
+- `POST /api/tools/:id/test` — Ejecutar tool con input de prueba
+- `POST /api/tools/sync` — Sincronizar tools del workspace con BD
+
 ### Metrics
 - `GET /api/metrics/runs-per-day` — Ejecuciones por día
 - `GET /api/metrics/response-times` — Tiempos de respuesta promedio
@@ -278,7 +307,7 @@ Cada agente tiene un directorio en `/workspaces/<slug>/`:
 
 - [x] **Fase 1 — Núcleo**: Flask, PostgreSQL, auth, chat SSE, runtime, workspace, OAuth
 - [x] **Fase 2 — Canales y Scheduler**: Matrix, heartbeat, cron, métricas completas, worker service
-- [ ] **Fase 3 — Skills y Tools**: registro dinámico, carga desde workspace, panel
-- [ ] **Fase 4 — Multiagente**: subagentes, delegación, topología
+- [x] **Fase 3 — Skills y Tools**: modelos Skill/Tool, registro dinámico, descubrimiento desde workspace, validación de manifiestos, carga dinámica de handlers, integración con runtime, panel dashboard
+- [x] **Fase 4 — Multiagente**: creación de sub-agentes, herencia de OAuth, delegación de tareas (síncrona), tools delegate_task/list_subagents, topología en dashboard, trazabilidad parent_run_id
 - [ ] **Fase 5 — Automejora**: patch proposals, diffs, tests, aprobación/rollback
 - [ ] **Fase 6 — Hardening**: sandbox, observabilidad avanzada, límites finos

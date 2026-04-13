@@ -28,7 +28,9 @@ def finish_run(run_id, status="completed", input_tokens=None, output_tokens=None
     run.error_summary = error_summary
 
     if run.started_at and run.finished_at:
-        run.duration_ms = int((run.finished_at - run.started_at).total_seconds() * 1000)
+        started = run.started_at.replace(tzinfo=None) if run.started_at.tzinfo else run.started_at
+        finished = run.finished_at.replace(tzinfo=None) if run.finished_at.tzinfo else run.finished_at
+        run.duration_ms = int((finished - started).total_seconds() * 1000)
 
     # Estimate cost (rough, for o4-mini)
     if input_tokens and output_tokens:

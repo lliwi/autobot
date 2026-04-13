@@ -21,11 +21,22 @@
     <div class="detail-item">
         <strong>OAuth Profile:</strong> {{ agent.oauth_profile_id or 'Not configured' }}
     </div>
+    {% if agent.parent_agent %}
+    <div class="detail-item">
+        <strong>Parent:</strong> <a href="{{ url_for('dashboard.agent_detail', agent_id=agent.parent_agent.id) }}">{{ agent.parent_agent.name }}</a>
+    </div>
+    {% endif %}
+    {% if agent.children %}
+    <div class="detail-item">
+        <strong>Sub-agents:</strong> {{ agent.children|length }}
+    </div>
+    {% endif %}
 </div>
 
 <div class="section" style="margin-top: 1rem;">
     <a href="{{ url_for('dashboard.skills_list', agent_id=agent.id) }}" class="btn">Skills</a>
     <a href="{{ url_for('dashboard.tools_list', agent_id=agent.id) }}" class="btn">Tools</a>
+    <a href="{{ url_for('dashboard.subagents_list', agent_id=agent.id) }}" class="btn">Sub-agents</a>
 </div>
 
 <div class="section">

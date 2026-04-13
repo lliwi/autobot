@@ -54,8 +54,8 @@ def execute(run_id, agent, tool_name, arguments):
     db.session.commit()
 
     try:
-        # Inject agent context for workspace tools
-        result = tool_def.handler(_agent=agent, **arguments)
+        # Inject agent context and run_id for built-in tools
+        result = tool_def.handler(_agent=agent, _run_id=run_id, **arguments)
         execution.output_json = result
         execution.status = "success"
     except Exception as e:

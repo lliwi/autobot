@@ -42,6 +42,7 @@ class Agent(db.Model):
             "parent_agent_id": self.parent_agent_id,
             "heartbeat_interval": self.heartbeat_interval,
             "group_response_policy": self.group_response_policy,
+            "children_count": len(self.children) if self.children else 0,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

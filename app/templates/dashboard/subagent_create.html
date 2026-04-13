@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+
+{% block title %}Create Sub-agent — {{ agent.name }} - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Create Sub-agent for {{ agent.name }}</h1>
+</div>
+
+<form method="POST" class="form" style="max-width: 500px;">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-group">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required class="form-control" placeholder="e.g. Code Reviewer">
+    </div>
+    <div class="form-group">
+        <label for="role">Role</label>
+        <input type="text" id="role" name="role" class="form-control" placeholder="e.g. Reviews code and suggests improvements">
+    </div>
+    <div class="form-group">
+        <label for="model_name">Model</label>
+        <input type="text" id="model_name" name="model_name" class="form-control" placeholder="Default: same as parent">
+    </div>
+    <div style="margin-top: 1rem;">
+        <button type="submit" class="btn btn-primary">Create</button>
+        <a href="{{ url_for('dashboard.subagents_list', agent_id=agent.id) }}" class="btn">Cancel</a>
+    </div>
+</form>
+{% endblock %}

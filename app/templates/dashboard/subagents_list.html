@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+
+{% block title %}Sub-agents — {{ agent.name }} - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Sub-agents — {{ agent.name }}</h1>
+    <div>
+        <a href="{{ url_for('dashboard.subagent_create', agent_id=agent.id) }}" class="btn btn-primary">New Sub-agent</a>
+        <a href="{{ url_for('dashboard.agent_detail', agent_id=agent.id) }}" class="btn">Back to Agent</a>
+    </div>
+</div>
+
+{% if subagents %}
+<table class="table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Slug</th>
+            <th>Model</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for sub in subagents %}
+        <tr>
+            <td><a href="{{ url_for('dashboard.agent_detail', agent_id=sub.id) }}">{{ sub.name }}</a></td>
+            <td><code>{{ sub.slug }}</code></td>
+            <td>{{ sub.model_name }}</td>
+            <td><span class="badge badge-{{ sub.status }}">{{ sub.status }}</span></td>
+            <td>{{ sub.created_at.strftime('%Y-%m-%d') if sub.created_at else '-' }}</td>
+            <td>
+                <form method="POST" action="{{ url_for('dashboard.agent_toggle', agent_id=sub.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm">
+                        {{ 'Stop' if sub.status == 'active' else 'Start' }}
+                    </button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="empty-state">No sub-agents yet. <a href="{{ url_for('dashboard.subagent_create', agent_id=agent.id) }}">Create one</a>.</p>
+{% endif %}
+{% endblock %}

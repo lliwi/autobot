@@ -9,7 +9,8 @@ class Run(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     agent_id = db.Column(db.Integer, db.ForeignKey("agents.id"), nullable=False, index=True)
     session_id = db.Column(db.Integer, db.ForeignKey("sessions.id"), nullable=True)
-    trigger_type = db.Column(db.String(50), nullable=False)  # message, cron, heartbeat, internal
+    parent_run_id = db.Column(db.Integer, db.ForeignKey("runs.id"), nullable=True, index=True)
+    trigger_type = db.Column(db.String(50), nullable=False)  # message, cron, heartbeat, internal, delegation
     status = db.Column(db.String(50), nullable=False, default="pending")
     started_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     finished_at = db.Column(db.DateTime, nullable=True)
@@ -20,6 +21,7 @@ class Run(db.Model):
     error_summary = db.Column(db.Text, nullable=True)
 
     # Relationships
+    parent_run = db.relationship("Run", remote_side=[id], backref="child_runs")
     tool_executions = db.relationship("ToolExecution", backref="run", lazy="dynamic")
 
     def to_dict(self):
@@ -27,6 +29,7 @@ class Run(db.Model):
             "id": self.id,
             "agent_id": self.agent_id,
             "session_id": self.session_id,
+            "parent_run_id": self.parent_run_id,
             "trigger_type": self.trigger_type,
             "status": self.status,
             "started_at": self.started_at.isoformat() if self.started_at else None,

@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Agent Topology - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Agent Topology</h1>
+</div>
+
+{% macro render_node(node) %}
+<div class="topology-node">
+    <div class="topology-card">
+        <div class="topology-card-header">
+            <a href="{{ url_for('dashboard.agent_detail', agent_id=node.id) }}">
+                <strong>{{ node.name }}</strong>
+            </a>
+            <span class="badge badge-{{ node.status }}">{{ node.status }}</span>
+        </div>
+        <div class="topology-card-body">
+            <small>
+                <code>{{ node.slug }}</code> &middot;
+                {{ node.model_name }} &middot;
+                {{ node.children|length }} sub-agent{{ 's' if node.children|length != 1 else '' }}
+            </small>
+        </div>
+    </div>
+    {% if node.children %}
+    <div class="topology-children" style="margin-left: 2rem; border-left: 2px solid var(--border-color, #ddd); padding-left: 1rem;">
+        {% for child in node.children %}
+            {{ render_node(child) }}
+        {% endfor %}
+    </div>
+    {% endif %}
+</div>
+{% endmacro %}
+
+{% if tree %}
+<div class="topology-tree">
+    {% for node in tree %}
+        {{ render_node(node) }}
+    {% endfor %}
+</div>
+{% else %}
+<p class="empty-state">No agents found. <a href="{{ url_for('dashboard.agent_create') }}">Create one</a>.</p>
+{% endif %}
+{% endblock %}
