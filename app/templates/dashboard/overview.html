@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+
+{% block title %}Overview - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Overview</h1>
+</div>
+
+<div class="stats-grid">
+    <div class="stat-card">
+        <div class="stat-value">{{ agents_count }}</div>
+        <div class="stat-label">Active Agents</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ total_runs }}</div>
+        <div class="stat-label">Total Runs</div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-value">{{ error_runs|length }}</div>
+        <div class="stat-label">Recent Errors</div>
+    </div>
+</div>
+
+<div class="section">
+    <h2>Recent Runs</h2>
+    {% if recent_runs %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Agent</th>
+                <th>Trigger</th>
+                <th>Status</th>
+                <th>Duration</th>
+                <th>Tokens</th>
+                <th>Started</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for run in recent_runs %}
+            <tr>
+                <td>{{ run.id }}</td>
+                <td>{{ run.agent.name if run.agent else '-' }}</td>
+                <td>{{ run.trigger_type }}</td>
+                <td><span class="badge badge-{{ run.status }}">{{ run.status }}</span></td>
+                <td>{{ run.duration_ms or '-' }} ms</td>
+                <td>{{ (run.input_tokens or 0) + (run.output_tokens or 0) }}</td>
+                <td>{{ run.started_at.strftime('%Y-%m-%d %H:%M') if run.started_at else '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty-state">No runs yet.</p>
+    {% endif %}
+</div>
+
+{% if error_runs %}
+<div class="section">
+    <h2>Recent Errors</h2>
+    <table class="table">
+        <thead>
+            <tr>
+                <th>ID</th>
+                <th>Agent</th>
+                <th>Error</th>
+                <th>When</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for run in error_runs %}
+            <tr>
+                <td>{{ run.id }}</td>
+                <td>{{ run.agent.name if run.agent else '-' }}</td>
+                <td>{{ run.error_summary or '-' }}</td>
+                <td>{{ run.started_at.strftime('%Y-%m-%d %H:%M') if run.started_at else '-' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Autobot{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    <script src="https://unpkg.com/htmx.org@2.0.4"></script>
+</head>
+<body>
+    {% if current_user.is_authenticated %}
+    <div class="layout">
+        <nav class="sidebar">
+            <div class="sidebar-header">
+                <h2>Autobot</h2>
+            </div>
+            <ul class="nav-links">
+                <li><a href="{{ url_for('dashboard.overview') }}" class="{% if request.endpoint == 'dashboard.overview' %}active{% endif %}">Overview</a></li>
+                <li><a href="{{ url_for('dashboard.chat') }}" class="{% if request.endpoint == 'dashboard.chat' %}active{% endif %}">Chat</a></li>
+                <li><a href="{{ url_for('dashboard.agents_list') }}" class="{% if request.endpoint and 'agent' in request.endpoint %}active{% endif %}">Agents</a></li>
+            </ul>
+            <div class="sidebar-footer">
+                <span>{{ current_user.email }}</span>
+                <a href="{{ url_for('dashboard.logout') }}">Logout</a>
+            </div>
+        </nav>
+        <main class="content">
+            {% with messages = get_flashed_messages(with_categories=true) %}
+                {% if messages %}
+                    {% for category, message in messages %}
+                        <div class="flash flash-{{ category }}">{{ message }}</div>
+                    {% endfor %}
+                {% endif %}
+            {% endwith %}
+            {% block content %}{% endblock %}
+        </main>
+    </div>
+    {% else %}
+        {% block public_content %}{% endblock %}
+    {% endif %}
+</body>
+</html>

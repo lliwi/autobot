@@ -1,0 +1,21 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    gcc libpq-dev && \
+    rm -rf /var/lib/apt/lists/*
+
+COPY pyproject.toml .
+# Create minimal setup for editable install
+RUN mkdir -p app && touch app/__init__.py
+RUN pip install --no-cache-dir -e ".[dev]"
+
+COPY . .
+
+ENV FLASK_APP=wsgi.py
+ENV FLASK_ENV=development
+
+EXPOSE 5000
+
+CMD ["flask", "run", "--host=0.0.0.0", "--debug"]

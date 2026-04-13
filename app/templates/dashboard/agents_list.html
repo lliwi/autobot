@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+
+{% block title %}Agents - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Agents</h1>
+    <a href="{{ url_for('dashboard.agent_create') }}" class="btn btn-primary">New Agent</a>
+</div>
+
+{% if agents %}
+<table class="table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Slug</th>
+            <th>Model</th>
+            <th>Status</th>
+            <th>Created</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for agent in agents %}
+        <tr>
+            <td><a href="{{ url_for('dashboard.agent_detail', agent_id=agent.id) }}">{{ agent.name }}</a></td>
+            <td><code>{{ agent.slug }}</code></td>
+            <td>{{ agent.model_name }}</td>
+            <td><span class="badge badge-{{ agent.status }}">{{ agent.status }}</span></td>
+            <td>{{ agent.created_at.strftime('%Y-%m-%d') if agent.created_at else '-' }}</td>
+            <td>
+                <form method="POST" action="{{ url_for('dashboard.agent_toggle', agent_id=agent.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm">
+                        {{ 'Stop' if agent.status == 'active' else 'Start' }}
+                    </button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="empty-state">No agents yet. <a href="{{ url_for('dashboard.agent_create') }}">Create one</a>.</p>
+{% endif %}
+{% endblock %}
