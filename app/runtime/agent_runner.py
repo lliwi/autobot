@@ -5,8 +5,6 @@ from flask import current_app
 from app.runtime.context_builder import build_context
 from app.runtime.model_client import stream_chat_completion
 from app.runtime.tool_executor import execute as execute_tool
-from app.runtime.tool_registry import get_all_definitions
-
 MAX_TOOL_ROUNDS = 10
 
 
@@ -21,7 +19,10 @@ def run(agent, session, user_message, run_id):
       - {"type": "done", "data": "...", "usage": {...}}
     """
     messages = build_context(agent, session, user_message)
-    tools = get_all_definitions()
+
+    from app.workspace.discovery import get_agent_tool_definitions
+
+    tools = get_agent_tool_definitions(agent)
     usage_total = {"input_tokens": 0, "output_tokens": 0}
 
     for round_num in range(MAX_TOOL_ROUNDS):

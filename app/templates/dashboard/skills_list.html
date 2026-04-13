@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Skills — {{ agent.name }} - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Skills — {{ agent.name }}</h1>
+    <div>
+        <form method="POST" action="{{ url_for('dashboard.skills_sync', agent_id=agent.id) }}" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-primary">Sync from Workspace</button>
+        </form>
+        <a href="{{ url_for('dashboard.agent_detail', agent_id=agent.id) }}" class="btn">Back to Agent</a>
+    </div>
+</div>
+
+{% if skills %}
+<table class="table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Version</th>
+            <th>Source</th>
+            <th>Description</th>
+            <th>Status</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for skill in skills %}
+        <tr>
+            <td><strong>{{ skill.name }}</strong><br><small><code>{{ skill.path }}</code></small></td>
+            <td>{{ skill.version }}</td>
+            <td>{{ skill.source }}</td>
+            <td>{{ skill.description or '-' }}</td>
+            <td><span class="badge badge-{{ 'active' if skill.enabled else 'inactive' }}">{{ 'Enabled' if skill.enabled else 'Disabled' }}</span></td>
+            <td>
+                <form method="POST" action="{{ url_for('dashboard.skill_toggle', skill_id=skill.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm">{{ 'Disable' if skill.enabled else 'Enable' }}</button>
+                </form>
+                <form method="POST" action="{{ url_for('dashboard.skill_reload', skill_id=skill.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm">Reload</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="empty-state">No skills found. Click "Sync from Workspace" to discover skills, or add them to <code>{{ agent.workspace_path }}/skills/</code>.</p>
+{% endif %}
+{% endblock %}

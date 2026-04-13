@@ -24,6 +24,15 @@ def build_context(agent, session, user_message):
     if memory:
         system_parts.append(f"## Memory\n{memory}")
 
+    # Inject enabled skill descriptions into system prompt
+    from app.workspace.discovery import get_enabled_skills
+    from app.workspace.manager import read_file
+
+    for skill in get_enabled_skills(agent):
+        skill_md = read_file(agent, f"{skill.path}/SKILL.md")
+        if skill_md:
+            system_parts.append(f"## Skill: {skill.name}\n{skill_md}")
+
     messages = []
 
     if system_parts:

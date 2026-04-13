@@ -23,6 +23,11 @@
     </div>
 </div>
 
+<div class="section" style="margin-top: 1rem;">
+    <a href="{{ url_for('dashboard.skills_list', agent_id=agent.id) }}" class="btn">Skills</a>
+    <a href="{{ url_for('dashboard.tools_list', agent_id=agent.id) }}" class="btn">Tools</a>
+</div>
+
 <div class="section">
     <h2>Workspace Files</h2>
     <div class="tabs">

@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+
+{% block title %}Tools — {{ agent.name }} - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Tools — {{ agent.name }}</h1>
+    <div>
+        <form method="POST" action="{{ url_for('dashboard.tools_sync', agent_id=agent.id) }}" style="display:inline;">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-primary">Sync from Workspace</button>
+        </form>
+        <a href="{{ url_for('dashboard.agent_detail', agent_id=agent.id) }}" class="btn">Back to Agent</a>
+    </div>
+</div>
+
+{% if tools %}
+<table class="table">
+    <thead>
+        <tr>
+            <th>Name</th>
+            <th>Version</th>
+            <th>Source</th>
+            <th>Timeout</th>
+            <th>Status</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for tool in tools %}
+        <tr>
+            <td>
+                <strong>{{ tool.name }}</strong>
+                <br><small>{{ tool.description or '' }}</small>
+                <br><small><code>{{ tool.path }}</code></small>
+            </td>
+            <td>{{ tool.version }}</td>
+            <td>{{ tool.source }}</td>
+            <td>{{ tool.timeout or '-' }}s</td>
+            <td><span class="badge badge-{{ 'active' if tool.enabled else 'inactive' }}">{{ 'Enabled' if tool.enabled else 'Disabled' }}</span></td>
+            <td>
+                <form method="POST" action="{{ url_for('dashboard.tool_toggle', tool_id=tool.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm">{{ 'Disable' if tool.enabled else 'Enable' }}</button>
+                </form>
+                <form method="POST" action="{{ url_for('dashboard.tool_test', tool_id=tool.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm">Test</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="empty-state">No workspace tools found. Click "Sync from Workspace" to discover tools, or add them to <code>{{ agent.workspace_path }}/tools/</code>.</p>
+{% endif %}
+{% endblock %}

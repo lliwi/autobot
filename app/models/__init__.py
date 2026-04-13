@@ -6,3 +6,5 @@ from app.models.run import Run  # noqa: F401
 from app.models.tool_execution import ToolExecution  # noqa: F401
 from app.models.oauth_profile import OAuthProfile  # noqa: F401
 from app.models.scheduled_task import ScheduledTask  # noqa: F401
+from app.models.skill import Skill  # noqa: F401
+from app.models.tool import Tool  # noqa: F401

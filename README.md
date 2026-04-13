@@ -45,6 +45,14 @@ Todas las variables se definen en `.env`. Ver `.env.example` para referencia.
 | `OPENAI_MODEL` | Modelo por defecto (default: `o4-mini`) | No |
 | `MAX_CONTEXT_TOKENS` | Límite de tokens de contexto (default: `128000`) | No |
 | `MAX_HISTORY_MESSAGES` | Mensajes de historial a incluir (default: `50`) | No |
+| `MATRIX_HOMESERVER` | URL del servidor Matrix (e.g. `https://matrix.org`) | Para Matrix |
+| `MATRIX_USER_ID` | User ID del bot Matrix (e.g. `@bot:matrix.org`) | Para Matrix |
+| `MATRIX_PASSWORD` | Contraseña del bot Matrix | Para Matrix |
+| `MATRIX_ALLOWED_ROOMS` | IDs de salas permitidas, separados por coma | No |
+| `MATRIX_ALLOWED_USERS` | User IDs permitidos, separados por coma | No |
+| `MATRIX_GROUP_POLICY` | Política de respuesta en grupo: `always`, `mention`, `allowlist` | No |
+| `SCHEDULER_ENABLED` | Activar scheduler (default: `true`) | No |
+| `HEARTBEAT_INTERVAL_MINUTES` | Intervalo de heartbeat en minutos (default: `15`) | No |
 
 ### Configuración de OpenAI Codex OAuth
 
@@ -98,7 +106,9 @@ docker compose run --rm web pytest tests/test_auth.py # Ejecutar un test especí
 │              │   Services     │                      │
 │              │ auth, agent,   │                      │
 │              │ chat, session, │                      │
-│              │ run, oauth     │                      │
+│              │ run, oauth,    │                      │
+│              │ scheduler,     │                      │
+│              │ metrics, matrix│                      │
 │              └───────┬────────┘                      │
 │                      │                               │
 │  ┌───────────────────▼────────────────────────────┐  │
@@ -119,8 +129,15 @@ docker compose run --rm web pytest tests/test_auth.py # Ejecutar un test especí
           │                    │
     ┌─────▼─────┐      ┌──────▼──────┐
     │PostgreSQL │      │    Redis    │
-    │  7 tablas │      │ cache/broker│
+    │  8 tablas │      │ cache/broker│
     └───────────┘      └─────────────┘
+┌─────────────────────────────────────────────────────┐
+│                 Worker Service                       │
+│  ┌──────────────────┐  ┌─────────────────────────┐  │
+│  │   APScheduler    │  │   Matrix Adapter        │  │
+│  │  heartbeat/cron  │  │   matrix-nio async      │  │
+│  └──────────────────┘  └─────────────────────────┘  │
+└─────────────────────────────────────────────────────┘
 ```
 
 ### Estructura del código
@@ -131,12 +148,12 @@ app/
 ├── config.py            # Configuración por entorno
 ├── extensions.py        # SQLAlchemy, Flask-Login, Bcrypt, CSRF
 ├── logging_config.py    # JSON logging estructurado a stdout
-├── models/              # SQLAlchemy: User, Agent, Session, Message, Run, ToolExecution, OAuthProfile
-├── api/                 # Blueprints REST: auth, agents, chat (SSE), runs, oauth
+├── models/              # SQLAlchemy: User, Agent, Session, Message, Run, ToolExecution, OAuthProfile, ScheduledTask
+├── api/                 # Blueprints REST: auth, agents, chat (SSE), runs, oauth, scheduler, metrics
 │   ├── middleware.py    # Decoradores auth_required, admin_required
 │   └── errors.py       # Manejadores de error JSON
-├── dashboard/           # Vistas HTMX: overview, agents, chat
-├── services/            # Lógica de negocio: auth, agent, session, chat, run, oauth
+├── dashboard/           # Vistas HTMX: overview, agents, chat, scheduler, metrics
+├── services/            # Lógica de negocio: auth, agent, session, chat, run, oauth, scheduler, metrics, matrix
 ├── runtime/             # Motor del agente
 │   ├── context_builder.py  # Ensambla system prompt desde workspace + historial
 │   ├── model_client.py     # Wrapper OpenAI SDK con streaming
@@ -148,6 +165,11 @@ app/
 │   └── loader.py        # Carga SOUL/AGENTS/MEMORY/TOOLS.md
 ├── templates/           # Jinja2 + HTMX
 └── static/              # CSS + JS (chat.js para SSE)
+
+worker.py                # Entry point del worker (scheduler + Matrix)
+app/worker/
+├── scheduler.py         # APScheduler con Redis job store
+└── matrix_adapter.py    # matrix-nio async client en daemon thread
 ```
 
 ### Modelo de datos
@@ -161,6 +183,7 @@ app/
 | `runs` | Ejecuciones del agente con métricas (tokens, coste, duración) |
 | `tool_executions` | Registro de cada invocación de tool |
 | `oauth_profiles` | Perfiles OAuth con tokens cifrados (Fernet) |
+| `scheduled_tasks` | Tareas programadas (cron, heartbeat, one-shot) |
 
 ### Runtime del agente
 
@@ -227,6 +250,22 @@ Cada agente tiene un directorio en `/workspaces/<slug>/`:
 - `POST /api/oauth/openai/refresh` — Refrescar tokens
 - `GET /api/oauth/profiles` — Listar perfiles OAuth
 
+### Scheduled Tasks
+- `GET /api/scheduled-tasks` — Listar tareas (filtrable por `agent_id`)
+- `POST /api/scheduled-tasks` — Crear tarea
+- `GET /api/scheduled-tasks/:id` — Detalle
+- `PUT /api/scheduled-tasks/:id` — Actualizar
+- `DELETE /api/scheduled-tasks/:id` — Eliminar
+- `POST /api/scheduled-tasks/:id/toggle` — Activar/desactivar
+
+### Metrics
+- `GET /api/metrics/runs-per-day` — Ejecuciones por día
+- `GET /api/metrics/response-times` — Tiempos de respuesta promedio
+- `GET /api/metrics/errors` — Errores por día
+- `GET /api/metrics/usage-by-agent` — Uso por agente
+- `GET /api/metrics/usage-by-channel` — Uso por canal
+- `GET /api/metrics/usage-by-tool` — Uso por tool
+
 ## Niveles de seguridad para automejora
 
 | Nivel | Permitido | Ejemplo |
@@ -238,7 +277,7 @@ Cada agente tiene un directorio en `/workspaces/<slug>/`:
 ## Roadmap
 
 - [x] **Fase 1 — Núcleo**: Flask, PostgreSQL, auth, chat SSE, runtime, workspace, OAuth
-- [ ] **Fase 2 — Canales y Scheduler**: Matrix, heartbeat, cron, métricas completas
+- [x] **Fase 2 — Canales y Scheduler**: Matrix, heartbeat, cron, métricas completas, worker service
 - [ ] **Fase 3 — Skills y Tools**: registro dinámico, carga desde workspace, panel
 - [ ] **Fase 4 — Multiagente**: subagentes, delegación, topología
 - [ ] **Fase 5 — Automejora**: patch proposals, diffs, tests, aprobación/rollback

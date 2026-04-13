@@ -20,13 +20,14 @@ def scaffold_workspace(slug):
 
     template = _template_path()
     if template.exists():
-        for src_file in template.iterdir():
-            if src_file.is_file():
-                dest = workspace / src_file.name
-                if not dest.exists():
-                    shutil.copy2(src_file, dest)
+        for src in template.iterdir():
+            dest = workspace / src.name
+            if src.is_file() and not dest.exists():
+                shutil.copy2(src, dest)
+            elif src.is_dir() and not dest.exists():
+                shutil.copytree(src, dest)
 
-    # Create standard subdirectories
+    # Create standard subdirectories (no-op if already copied from template)
     for subdir in ("skills", "tools", "agents", "runs", "patches", "tests"):
         (workspace / subdir).mkdir(exist_ok=True)
 

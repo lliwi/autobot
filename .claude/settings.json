@@ -18,7 +18,8 @@
       "Bash(git push:*)",
       "Bash(git fetch:*)",
       "Bash(git rebase:*)",
-      "Bash(git checkout:*)"
+      "Bash(git checkout:*)",
+      "Bash(wc -l /home/llibert/Documents/development/flask/autobot/app/runtime/*.py)"
     ]
   }
 }
