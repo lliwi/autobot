@@ -1,0 +1,24 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//home/llibert/Documents/development/flask/**)",
+      "Bash(docker compose:*)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5000/login)",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\" http://localhost:5000/)",
+      "Bash(curl -s -X POST http://localhost:5000/api/auth/login -H \"Content-Type: application/json\" -d '{\"email\":\"admin@autobot.local\",\"password\":\"admin123\"}')",
+      "mcp__chrome-devtools__navigate_page",
+      "mcp__chrome-devtools__take_screenshot",
+      "mcp__chrome-devtools__take_snapshot",
+      "mcp__chrome-devtools__fill",
+      "mcp__chrome-devtools__click",
+      "Bash(git remote:*)",
+      "Bash(git add:*)",
+      "Bash(git commit -m ':*)",
+      "Bash(git branch:*)",
+      "Bash(git push:*)",
+      "Bash(git fetch:*)",
+      "Bash(git rebase:*)",
+      "Bash(git checkout:*)"
+    ]
+  }
+}

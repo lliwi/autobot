@@ -3,13 +3,28 @@ from app.models.message import Message
 from app.models.session import Session
 
 
-def get_or_create_session(agent_id, channel_type="web", session_id=None):
+def get_or_create_session(agent_id, channel_type="web", session_id=None, external_chat_id=None, external_user_id=None):
     if session_id:
         session = db.session.get(Session, session_id)
         if session and session.agent_id == agent_id:
             return session
 
-    session = Session(agent_id=agent_id, channel_type=channel_type)
+    # For Matrix/external channels, reuse session by external_chat_id
+    if external_chat_id:
+        session = Session.query.filter_by(
+            agent_id=agent_id,
+            channel_type=channel_type,
+            external_chat_id=external_chat_id,
+        ).first()
+        if session:
+            return session
+
+    session = Session(
+        agent_id=agent_id,
+        channel_type=channel_type,
+        external_chat_id=external_chat_id,
+        external_user_id=external_user_id,
+    )
     db.session.add(session)
     db.session.commit()
     return session

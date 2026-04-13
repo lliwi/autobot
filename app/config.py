@@ -27,6 +27,18 @@ class Config:
     MAX_CONTEXT_TOKENS = int(os.environ.get("MAX_CONTEXT_TOKENS", "128000"))
     MAX_HISTORY_MESSAGES = int(os.environ.get("MAX_HISTORY_MESSAGES", "50"))
 
+    # Matrix
+    MATRIX_HOMESERVER = os.environ.get("MATRIX_HOMESERVER", "")
+    MATRIX_USER_ID = os.environ.get("MATRIX_USER_ID", "")
+    MATRIX_PASSWORD = os.environ.get("MATRIX_PASSWORD", "")
+    MATRIX_ALLOWED_ROOMS = os.environ.get("MATRIX_ALLOWED_ROOMS", "")  # comma-separated
+    MATRIX_ALLOWED_USERS = os.environ.get("MATRIX_ALLOWED_USERS", "")  # comma-separated
+    MATRIX_GROUP_POLICY = os.environ.get("MATRIX_GROUP_POLICY", "mention")  # always, mention, allowlist
+
+    # Scheduler
+    SCHEDULER_ENABLED = os.environ.get("SCHEDULER_ENABLED", "true").lower() == "true"
+    HEARTBEAT_INTERVAL_MINUTES = int(os.environ.get("HEARTBEAT_INTERVAL_MINUTES", "15"))
+
     # Rate limiting
     RATELIMIT_STORAGE_URI = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 

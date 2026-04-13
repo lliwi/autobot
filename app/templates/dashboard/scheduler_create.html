@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block title %}Create Scheduled Task - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Create Scheduled Task</h1>
+</div>
+
+<form method="POST" class="form-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-group">
+        <label for="agent_id">Agent</label>
+        <select id="agent_id" name="agent_id" required>
+            <option value="">Select an agent</option>
+            {% for agent in agents %}
+            <option value="{{ agent.id }}">{{ agent.name }}</option>
+            {% endfor %}
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="task_type">Task Type</label>
+        <select id="task_type" name="task_type" required>
+            <option value="cron">Cron</option>
+            <option value="heartbeat">Heartbeat</option>
+            <option value="one_shot">One Shot</option>
+        </select>
+    </div>
+    <div class="form-group">
+        <label for="schedule_expr">Cron Expression</label>
+        <input type="text" id="schedule_expr" name="schedule_expr" placeholder="*/15 * * * *">
+        <small>Required for cron tasks. E.g. <code>*/15 * * * *</code> (every 15 min), <code>0 9 * * 1-5</code> (weekdays at 9am)</small>
+    </div>
+    <div class="form-group">
+        <label for="timezone">Timezone</label>
+        <input type="text" id="timezone" name="timezone" value="UTC" placeholder="UTC">
+    </div>
+    <div class="form-group">
+        <label for="payload_message">Payload Message</label>
+        <textarea id="payload_message" name="payload_message" rows="3" placeholder="Message to send to the agent..."></textarea>
+    </div>
+    <div class="form-group">
+        <label for="max_retries">Max Retries</label>
+        <input type="number" id="max_retries" name="max_retries" value="3" min="0" max="10">
+    </div>
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Create</button>
+        <a href="{{ url_for('dashboard.scheduler_list') }}" class="btn">Cancel</a>
+    </div>
+</form>
+{% endblock %}

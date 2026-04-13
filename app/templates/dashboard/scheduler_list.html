@@ -1,0 +1,54 @@
+{% extends "base.html" %}
+
+{% block title %}Scheduler - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Scheduled Tasks</h1>
+    <a href="{{ url_for('dashboard.scheduler_create') }}" class="btn btn-primary">New Task</a>
+</div>
+
+{% if tasks %}
+<table class="table">
+    <thead>
+        <tr>
+            <th>Agent</th>
+            <th>Type</th>
+            <th>Schedule</th>
+            <th>Timezone</th>
+            <th>Enabled</th>
+            <th>Last Run</th>
+            <th>Next Run</th>
+            <th>Retries</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for task in tasks %}
+        <tr>
+            <td>{{ task.agent.name if task.agent else 'N/A' }}</td>
+            <td><code>{{ task.task_type }}</code></td>
+            <td><code>{{ task.schedule_expr or '-' }}</code></td>
+            <td>{{ task.timezone }}</td>
+            <td><span class="badge badge-{{ 'active' if task.enabled else 'inactive' }}">{{ 'Yes' if task.enabled else 'No' }}</span></td>
+            <td>{{ task.last_run_at.strftime('%Y-%m-%d %H:%M') if task.last_run_at else '-' }}</td>
+            <td>{{ task.next_run_at.strftime('%Y-%m-%d %H:%M') if task.next_run_at else '-' }}</td>
+            <td>{{ task.retry_count }}/{{ task.max_retries }}</td>
+            <td>
+                <form method="POST" action="{{ url_for('dashboard.scheduler_toggle', task_id=task.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm">{{ 'Disable' if task.enabled else 'Enable' }}</button>
+                </form>
+                <form method="POST" action="{{ url_for('dashboard.scheduler_delete', task_id=task.id) }}" style="display:inline;" onsubmit="return confirm('Delete this task?')">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="empty-state">No scheduled tasks yet. <a href="{{ url_for('dashboard.scheduler_create') }}">Create one</a>.</p>
+{% endif %}
+{% endblock %}

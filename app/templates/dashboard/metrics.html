@@ -1,0 +1,126 @@
+{% extends "base.html" %}
+
+{% block title %}Metrics - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Metrics</h1>
+    <div>
+        <select id="days-select" class="btn">
+            <option value="7">Last 7 days</option>
+            <option value="30" selected>Last 30 days</option>
+            <option value="90">Last 90 days</option>
+        </select>
+    </div>
+</div>
+
+<div class="metrics-grid">
+    <div class="card">
+        <h3>Runs per Day</h3>
+        <canvas id="chart-runs"></canvas>
+    </div>
+    <div class="card">
+        <h3>Avg Response Time (ms)</h3>
+        <canvas id="chart-response"></canvas>
+    </div>
+    <div class="card">
+        <h3>Errors per Day</h3>
+        <canvas id="chart-errors"></canvas>
+    </div>
+    <div class="card">
+        <h3>Usage by Agent</h3>
+        <canvas id="chart-agents"></canvas>
+    </div>
+    <div class="card">
+        <h3>Usage by Channel</h3>
+        <canvas id="chart-channels"></canvas>
+    </div>
+    <div class="card">
+        <h3>Tool Executions</h3>
+        <canvas id="chart-tools"></canvas>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+<script>
+const COLORS = ['#4f46e5', '#06b6d4', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#14b8a6'];
+
+function fetchJson(url) {
+    return fetch(url, {credentials: 'same-origin'}).then(r => r.json());
+}
+
+function lineChart(canvasId, labels, data, label, color) {
+    new Chart(document.getElementById(canvasId), {
+        type: 'line',
+        data: {
+            labels: labels,
+            datasets: [{label, data, borderColor: color, backgroundColor: color + '33', fill: true, tension: 0.3}]
+        },
+        options: {responsive: true, plugins: {legend: {display: false}}, scales: {y: {beginAtZero: true}}}
+    });
+}
+
+function barChart(canvasId, labels, data, label, colors) {
+    new Chart(document.getElementById(canvasId), {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{label, data, backgroundColor: colors || COLORS.slice(0, labels.length)}]
+        },
+        options: {responsive: true, plugins: {legend: {display: false}}, scales: {y: {beginAtZero: true}}}
+    });
+}
+
+function loadCharts(days) {
+    // Clear existing charts
+    Chart.helpers.each(Chart.instances, c => c.destroy());
+
+    fetchJson(`/api/metrics/runs-per-day?days=${days}`).then(d => {
+        lineChart('chart-runs', d.map(r => r.day), d.map(r => r.count), 'Runs', '#4f46e5');
+    });
+
+    fetchJson(`/api/metrics/response-times?days=${days}`).then(d => {
+        lineChart('chart-response', d.map(r => r.day), d.map(r => r.avg_ms), 'Avg ms', '#06b6d4');
+    });
+
+    fetchJson(`/api/metrics/errors?days=${days}`).then(d => {
+        lineChart('chart-errors', d.map(r => r.day), d.map(r => r.count), 'Errors', '#ef4444');
+    });
+
+    fetchJson(`/api/metrics/usage-by-agent?days=${days}`).then(d => {
+        barChart('chart-agents', d.map(r => r.agent_name), d.map(r => r.runs), 'Runs');
+    });
+
+    fetchJson(`/api/metrics/usage-by-channel?days=${days}`).then(d => {
+        barChart('chart-channels', d.map(r => r.channel), d.map(r => r.runs), 'Runs');
+    });
+
+    fetchJson(`/api/metrics/usage-by-tool?days=${days}`).then(d => {
+        barChart('chart-tools', d.map(r => r.tool_name), d.map(r => r.count), 'Executions');
+    });
+}
+
+document.getElementById('days-select').addEventListener('change', e => loadCharts(e.target.value));
+loadCharts(30);
+</script>
+
+<style>
+.metrics-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    gap: 1.5rem;
+    margin-top: 1rem;
+}
+.metrics-grid .card {
+    background: var(--bg-card, #fff);
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: 8px;
+    padding: 1.25rem;
+}
+.metrics-grid .card h3 {
+    margin: 0 0 0.75rem;
+    font-size: 0.95rem;
+    color: var(--text-secondary, #6b7280);
+}
+</style>
+{% endblock %}

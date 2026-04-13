@@ -14,6 +14,8 @@ class Agent(db.Model):
     model_name = db.Column(db.String(100), nullable=False, default="o4-mini")
     oauth_profile_id = db.Column(db.Integer, db.ForeignKey("oauth_profiles.id"), nullable=True)
     parent_agent_id = db.Column(db.Integer, db.ForeignKey("agents.id"), nullable=True)
+    heartbeat_interval = db.Column(db.Integer, nullable=True, default=15)  # minutes, null = disabled
+    group_response_policy = db.Column(db.String(50), nullable=False, default="mention")  # always, mention, allowlist
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(
         db.DateTime,
@@ -38,6 +40,8 @@ class Agent(db.Model):
             "model_name": self.model_name,
             "oauth_profile_id": self.oauth_profile_id,
             "parent_agent_id": self.parent_agent_id,
+            "heartbeat_interval": self.heartbeat_interval,
+            "group_response_policy": self.group_response_policy,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

@@ -13,6 +13,20 @@ services:
       - postgres
       - redis
 
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.dev
+    volumes:
+      - .:/app
+    env_file:
+      - .env
+    depends_on:
+      - postgres
+      - redis
+    command: ["python", "worker.py"]
+    restart: unless-stopped
+
   postgres:
     image: postgres:16
     environment:
