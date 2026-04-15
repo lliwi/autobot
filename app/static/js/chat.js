@@ -5,19 +5,63 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatForm = document.getElementById('chat-form');
     const messagesDiv = document.getElementById('messages');
 
+    const LAST_AGENT_KEY = 'autobot.chat.lastAgentId';
+
     let sessionId = null;
     let streaming = false;
 
-    agentSelect.addEventListener('change', () => {
-        const enabled = agentSelect.value !== '';
+    async function loadHistory(agentId) {
+        sessionId = null;
+        messagesDiv.innerHTML = '';
+        try {
+            const res = await fetch(`/api/chat/history?agent_id=${agentId}`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            const data = await res.json();
+            if (data.session && data.messages && data.messages.length) {
+                sessionId = data.session.id;
+                for (const m of data.messages) {
+                    renderPersistedMessage(m);
+                }
+            } else {
+                messagesDiv.innerHTML = '<p class="empty-state">Start chatting with the agent.</p>';
+            }
+        } catch (err) {
+            messagesDiv.innerHTML = `<p class="empty-state">Could not load history: ${err.message}</p>`;
+        }
+        scrollToBottom();
+    }
+
+    function renderPersistedMessage(m) {
+        if (m.role === 'user' || m.role === 'assistant') {
+            appendMessage(m.role, m.content);
+        } else if (m.role === 'tool' || m.role === 'system') {
+            appendMessage('tool', m.content);
+        }
+    }
+
+    async function onAgentChange() {
+        const agentId = agentSelect.value;
+        const enabled = agentId !== '';
         messageInput.disabled = !enabled;
         sendBtn.disabled = !enabled;
         if (enabled) {
-            sessionId = null;
-            messagesDiv.innerHTML = '<p class="empty-state">Start chatting with the agent.</p>';
+            localStorage.setItem(LAST_AGENT_KEY, agentId);
+            await loadHistory(agentId);
             messageInput.focus();
+        } else {
+            sessionId = null;
+            messagesDiv.innerHTML = '<p class="empty-state">Select an agent and start chatting.</p>';
         }
-    });
+    }
+
+    agentSelect.addEventListener('change', onAgentChange);
+
+    // Restore last-selected agent on page load
+    const savedAgentId = localStorage.getItem(LAST_AGENT_KEY);
+    if (savedAgentId && [...agentSelect.options].some(o => o.value === savedAgentId)) {
+        agentSelect.value = savedAgentId;
+        onAgentChange();
+    }
 
     chatForm.addEventListener('submit', async (e) => {
         e.preventDefault();
@@ -26,15 +70,12 @@ document.addEventListener('DOMContentLoaded', () => {
         const message = messageInput.value.trim();
         messageInput.value = '';
 
-        // Clear empty state
         if (messagesDiv.querySelector('.empty-state')) {
             messagesDiv.innerHTML = '';
         }
 
-        // Add user message
         appendMessage('user', message);
 
-        // Start streaming
         streaming = true;
         sendBtn.disabled = true;
         messageInput.disabled = true;
@@ -89,7 +130,6 @@ document.addEventListener('DOMContentLoaded', () => {
         scrollToBottom();
     });
 
-    // Enter to send, Shift+Enter for newline
     messageInput.addEventListener('keydown', (e) => {
         if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault();
@@ -99,6 +139,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function handleChunk(chunk, contentSpan) {
         switch (chunk.type) {
+            case 'session':
+                if (chunk.data && chunk.data.id) sessionId = chunk.data.id;
+                break;
+
             case 'token':
                 contentSpan.textContent += chunk.data;
                 scrollToBottom();

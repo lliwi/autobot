@@ -40,9 +40,36 @@
             <option value="inactive" {% if agent.status == 'inactive' %}selected{% endif %}>inactive</option>
         </select>
     </div>
+    <div class="form-group">
+        <label for="parent_agent_id">Parent agent</label>
+        <select id="parent_agent_id" name="parent_agent_id">
+            <option value="">— none (root agent) —</option>
+            {% for candidate in parent_candidates %}
+            <option value="{{ candidate.id }}" {% if agent.parent_agent_id == candidate.id %}selected{% endif %}>
+                {{ candidate.name }} ({{ candidate.slug }})
+            </option>
+            {% endfor %}
+        </select>
+        <small class="help-text">Self and descendants are excluded to prevent cycles.</small>
+    </div>
     <div class="form-actions">
         <button type="submit" class="btn btn-primary">Save</button>
         <a href="{{ url_for('dashboard.agent_detail', agent_id=agent.id) }}" class="btn">Cancel</a>
     </div>
 </form>
+
+<div class="form-card" style="margin-top: 1.5rem; border-color: var(--danger, #ef4444);">
+    <h3 style="margin-top:0;">Danger zone</h3>
+    <form method="POST" action="{{ url_for('dashboard.agent_delete', agent_id=agent.id) }}"
+          onsubmit="return confirm('Delete agent {{ agent.name|e }}? This removes all its runs, sessions, tools, skills and scheduled tasks. This cannot be undone.');">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group">
+            <label>
+                <input type="checkbox" name="remove_workspace">
+                Also delete the workspace directory on disk ({{ agent.workspace_path }})
+            </label>
+        </div>
+        <button type="submit" class="btn btn-danger">Delete agent</button>
+    </form>
+</div>
 {% endblock %}

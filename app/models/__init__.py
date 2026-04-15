@@ -8,3 +8,5 @@ from app.models.scheduled_task import ScheduledTask  # noqa: F401
 from app.models.skill import Skill  # noqa: F401
 from app.models.tool import Tool  # noqa: F401
 from app.models.patch_proposal import PatchProposal  # noqa: F401
+from app.models.objective import Objective  # noqa: F401
+from app.models.heartbeat_event import HeartbeatEvent  # noqa: F401

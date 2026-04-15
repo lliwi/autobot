@@ -1,3 +1,5 @@
+from datetime import datetime, time, timezone
+
 from flask import Response, jsonify, request, stream_with_context
 
 from app.api import api_bp
@@ -27,6 +29,38 @@ def chat():
         stream_with_context(generate()),
         content_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@api_bp.route("/chat/history")
+@auth_required
+def chat_history():
+    """Return today's most recent web session for an agent and its messages."""
+    from app.models.message import Message
+
+    agent_id = request.args.get("agent_id", type=int)
+    if not agent_id:
+        return jsonify(error="agent_id required"), 400
+
+    start_of_day = datetime.combine(datetime.now(timezone.utc).date(), time.min, tzinfo=timezone.utc)
+
+    session = (
+        Session.query.filter_by(agent_id=agent_id, channel_type="web")
+        .filter(Session.updated_at >= start_of_day)
+        .order_by(Session.updated_at.desc())
+        .first()
+    )
+    if session is None:
+        return jsonify(session=None, messages=[])
+
+    messages = (
+        Message.query.filter_by(session_id=session.id)
+        .order_by(Message.created_at.asc())
+        .all()
+    )
+    return jsonify(
+        session=session.to_dict(),
+        messages=[m.to_dict() for m in messages],
     )
 
 

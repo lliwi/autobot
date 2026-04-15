@@ -42,6 +42,8 @@ def stream_response(agent_id, message, session_id=None):
         yield json.dumps({"type": "error", "data": error})
         return
 
+    yield json.dumps({"type": "session", "data": {"id": session.id}})
+
     # Run agent and stream response
     full_response = ""
     usage = {}

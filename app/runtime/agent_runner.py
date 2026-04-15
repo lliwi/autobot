@@ -24,6 +24,7 @@ def run(agent, session, user_message, run_id):
 
     tools = get_agent_tool_definitions(agent)
     usage_total = {"input_tokens": 0, "output_tokens": 0}
+    repeat_signatures: dict[str, int] = {}
 
     for round_num in range(MAX_TOOL_ROUNDS):
         full_response = ""
@@ -77,9 +78,18 @@ def run(agent, session, user_message, run_id):
             except json.JSONDecodeError:
                 arguments = {}
 
+            signature = f"{tool_name}:{json.dumps(arguments, sort_keys=True)}"
+            repeat_signatures[signature] = repeat_signatures.get(signature, 0) + 1
+
             yield json.dumps({"type": "tool_call", "data": {"name": tool_name, "arguments": arguments}})
 
-            result = execute_tool(run_id, agent, tool_name, arguments)
+            if repeat_signatures[signature] >= 3:
+                result = {
+                    "error": f"Repeated identical call to '{tool_name}' with the same arguments detected. Stop calling this tool with these arguments — inspect the previous tool result and try a different approach or answer the user directly.",
+                    "previous_call_count": repeat_signatures[signature],
+                }
+            else:
+                result = execute_tool(run_id, agent, tool_name, arguments)
 
             yield json.dumps({"type": "tool_result", "data": {"tool": tool_name, "result": result}})
 

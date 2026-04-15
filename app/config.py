@@ -23,7 +23,7 @@ class Config:
     TOKEN_ENCRYPTION_KEY = os.environ.get("TOKEN_ENCRYPTION_KEY", "")
 
     # Agent defaults
-    OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "o4-mini")
+    OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.2")
     MAX_CONTEXT_TOKENS = int(os.environ.get("MAX_CONTEXT_TOKENS", "128000"))
     MAX_HISTORY_MESSAGES = int(os.environ.get("MAX_HISTORY_MESSAGES", "50"))
 

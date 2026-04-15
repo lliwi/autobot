@@ -1,4 +1,6 @@
 import re
+import shutil
+from pathlib import Path
 
 from flask import current_app
 
@@ -45,5 +47,79 @@ def update_agent(agent, data):
         agent.model_name = data["model_name"]
     if "status" in data and data["status"] in ("active", "inactive"):
         agent.status = data["status"]
+    if "parent_agent_id" in data:
+        raw = data["parent_agent_id"]
+        if raw in (None, "", "none", "null"):
+            agent.parent_agent_id = None
+        else:
+            try:
+                new_parent_id = int(raw)
+            except (TypeError, ValueError):
+                raise ValueError("Invalid parent_agent_id")
+            if new_parent_id == agent.id:
+                raise ValueError("An agent cannot be its own parent")
+            if new_parent_id in _descendant_ids(agent):
+                raise ValueError("Cannot set a descendant as parent (would create a cycle)")
+            if db.session.get(Agent, new_parent_id) is None:
+                raise ValueError("Parent agent not found")
+            agent.parent_agent_id = new_parent_id
     db.session.commit()
     return agent
+
+
+def _descendant_ids(agent):
+    """Return the set of agent IDs that descend from ``agent`` (children, grandchildren...)."""
+    ids: set[int] = set()
+    stack = list(agent.children or [])
+    while stack:
+        child = stack.pop()
+        if child.id in ids:
+            continue
+        ids.add(child.id)
+        stack.extend(child.children or [])
+    return ids
+
+
+def delete_agent(agent, remove_workspace: bool = False):
+    """Delete an agent and all of its dependent rows.
+
+    Refuses if the agent still has child agents — the caller must re-parent or
+    delete those first. When ``remove_workspace`` is True the workspace
+    directory on disk is removed too.
+    """
+    if agent.children:
+        child_names = ", ".join(c.name for c in agent.children)
+        raise ValueError(f"Agent has child agents ({child_names}). Delete or re-parent them first.")
+
+    from app.models.message import Message
+    from app.models.patch_proposal import PatchProposal
+    from app.models.run import Run
+    from app.models.scheduled_task import ScheduledTask
+    from app.models.session import Session
+    from app.models.skill import Skill
+    from app.models.tool import Tool
+    from app.models.tool_execution import ToolExecution
+
+    agent_id = agent.id
+    workspace_path = agent.workspace_path
+
+    # Messages are linked to sessions, not agents directly — delete via session IDs.
+    session_ids = [s.id for s in Session.query.filter_by(agent_id=agent_id).all()]
+    if session_ids:
+        Message.query.filter(Message.session_id.in_(session_ids)).delete(synchronize_session=False)
+
+    ToolExecution.query.filter_by(agent_id=agent_id).delete(synchronize_session=False)
+    Run.query.filter_by(agent_id=agent_id).delete(synchronize_session=False)
+    Session.query.filter_by(agent_id=agent_id).delete(synchronize_session=False)
+    Tool.query.filter_by(agent_id=agent_id).delete(synchronize_session=False)
+    Skill.query.filter_by(agent_id=agent_id).delete(synchronize_session=False)
+    ScheduledTask.query.filter_by(agent_id=agent_id).delete(synchronize_session=False)
+    PatchProposal.query.filter_by(agent_id=agent_id).delete(synchronize_session=False)
+
+    db.session.delete(agent)
+    db.session.commit()
+
+    if remove_workspace and workspace_path:
+        path = Path(workspace_path)
+        if path.exists() and path.is_dir():
+            shutil.rmtree(path, ignore_errors=True)

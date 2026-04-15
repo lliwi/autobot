@@ -207,6 +207,16 @@ body {
     font-size: 12px;
 }
 
+.btn-danger {
+    background: var(--danger);
+    color: #fff;
+    border-color: var(--danger);
+}
+
+.btn-danger:hover {
+    filter: brightness(0.92);
+}
+
 .btn:disabled {
     opacity: 0.5;
     cursor: not-allowed;

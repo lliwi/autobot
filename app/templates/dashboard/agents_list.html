@@ -37,6 +37,12 @@
                         {{ 'Stop' if agent.status == 'active' else 'Start' }}
                     </button>
                 </form>
+                <a href="{{ url_for('dashboard.agent_edit', agent_id=agent.id) }}" class="btn btn-sm">Edit</a>
+                <form method="POST" action="{{ url_for('dashboard.agent_delete', agent_id=agent.id) }}" style="display:inline;"
+                      onsubmit="return confirm('Delete agent {{ agent.name|e }}? This removes all its runs, sessions, tools, skills and scheduled tasks.');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                </form>
             </td>
         </tr>
         {% endfor %}

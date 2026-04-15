@@ -157,13 +157,28 @@ def register_builtin_tools():
     )
 
 
-def _read_workspace_file(filename, _agent=None, **kwargs):
+def _read_workspace_file(_agent=None, filename=None, path=None, file=None, name=None, **kwargs):
     if _agent is None:
         return {"error": "No agent context"}
-    from app.workspace.manager import read_file
+    # Accept common aliases the model might emit.
+    filename = filename or path or file or name
+    from app.workspace.manager import list_files, read_file
 
-    content = read_file(_agent, filename)
-    return {"filename": filename, "content": content}
+    if not filename:
+        available = list_files(_agent)
+        return {
+            "error": "Missing required argument 'filename'.",
+            "hint": "Call this tool again with filename set to one of the entries in 'available_files'.",
+            "available_files": available,
+        }
+
+    available = list_files(_agent)
+    if filename not in available:
+        return {
+            "error": f"File '{filename}' not found in workspace.",
+            "available_files": available,
+        }
+    return {"filename": filename, "content": read_file(_agent, filename)}
 
 
 def _list_workspace_files(_agent=None, **kwargs):
@@ -175,9 +190,12 @@ def _list_workspace_files(_agent=None, **kwargs):
     return {"files": files}
 
 
-def _delegate_task(target_name, message, _agent=None, _run_id=None, **kwargs):
+def _delegate_task(_agent=None, _run_id=None, target_name=None, message=None, **kwargs):
     if _agent is None:
         return {"error": "No agent context"}
+    missing = [k for k, v in (("target_name", target_name), ("message", message)) if not v]
+    if missing:
+        return {"error": f"Missing required argument(s): {', '.join(missing)}"}
     from app.services.subagent_service import delegate_task_by_name
 
     return delegate_task_by_name(_agent.id, target_name, message, parent_run_id=_run_id)
@@ -197,9 +215,17 @@ def _list_subagents(_agent=None, **kwargs):
     }
 
 
-def _propose_change(target_path, new_content, title, reason, _agent=None, _run_id=None, **kwargs):
+def _propose_change(_agent=None, _run_id=None, target_path=None, new_content=None, title=None, reason=None, **kwargs):
     if _agent is None:
         return {"error": "No agent context"}
+    missing = [k for k, v in (
+        ("target_path", target_path),
+        ("new_content", new_content),
+        ("title", title),
+        ("reason", reason),
+    ) if not v]
+    if missing:
+        return {"error": f"Missing required argument(s): {', '.join(missing)}"}
     from app.services.patch_service import propose_change
 
     try:

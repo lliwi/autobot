@@ -58,9 +58,7 @@ def register_cli(app):
 
     @app.cli.command("onboard")
     def onboard():
-        """Interactive initial setup: database, admin user, encryption key, and OAuth."""
-        import secrets
-
+        """Interactive initial setup: database, admin user, encryption key, OAuth and orchestrator agent."""
         from cryptography.fernet import Fernet
 
         from app.models.user import User
@@ -71,7 +69,7 @@ def register_cli(app):
         click.echo()
 
         # 1. Run migrations
-        click.echo("[1/4] Applying database migrations...")
+        click.echo("[1/5] Applying database migrations...")
         from flask_migrate import upgrade
 
         upgrade()
@@ -79,7 +77,7 @@ def register_cli(app):
         click.echo()
 
         # 2. Create admin user
-        click.echo("[2/4] Admin user setup")
+        click.echo("[2/5] Admin user setup")
         existing = User.query.first()
         if existing:
             click.echo(f"  Admin user already exists: {existing.email}")
@@ -101,7 +99,7 @@ def register_cli(app):
         click.echo()
 
         # 3. Encryption key
-        click.echo("[3/4] Token encryption key")
+        click.echo("[3/5] Token encryption key")
         current_key = app.config.get("TOKEN_ENCRYPTION_KEY", "")
         if current_key:
             click.echo("  TOKEN_ENCRYPTION_KEY is already set in .env")
@@ -112,9 +110,14 @@ def register_cli(app):
             click.echo(f"  TOKEN_ENCRYPTION_KEY={new_key}")
         click.echo()
 
-        # 4. OAuth config + interactive login
-        click.echo("[4/4] OpenAI Codex OAuth")
+        # 4. Codex OAuth
+        click.echo("[4/5] OpenAI Codex OAuth")
         _run_codex_login(app)
+        click.echo()
+
+        # 5. Default agents (orchestrator + reviewer)
+        click.echo("[5/5] Default agents (orchestrator + reviewer)")
+        _run_default_agents_setup(app)
         click.echo()
 
         click.echo("=" * 50)
@@ -122,6 +125,11 @@ def register_cli(app):
         click.echo()
         click.echo("  Open http://localhost:5000")
         click.echo("=" * 50)
+
+    @app.cli.command("setup-default-agents")
+    def setup_default_agents():
+        """Create (or reconfigure) the default agents: orchestrator (optimus) and reviewer."""
+        _run_default_agents_setup(app)
 
     @app.cli.command("codex-login")
     def codex_login():
@@ -179,3 +187,183 @@ def _run_codex_login(app):
 
     click.echo()
     click.echo(f"  ✓ Codex connected. account_id={token.account_id}")
+
+
+DEFAULT_AGENT_SPECS = [
+    {
+        "slug": "optimus",
+        "label": "Orchestrator",
+        "type_label": "orchestrator",
+        "default_name": "optimus",
+        "default_role": "Orchestrator agent coordinating sub-agents and tools",
+        "default_tone": "concise, direct, professional",
+        "default_priorities": "task decomposition, delegation, observability",
+        "default_limits": "no destructive ops without confirmation, no access outside workspace",
+        "default_mission": "Coordinate Autobot sub-agents to accomplish user goals reliably.",
+    },
+    {
+        "slug": "reviewer",
+        "label": "Reviewer",
+        "type_label": "reviewer",
+        "default_name": "reviewer",
+        "default_role": "Reviewer agent auditing the work of other agents and sub-agents",
+        "default_tone": "rigorous, constructive, specific",
+        "default_priorities": "detect errors, surface improvement opportunities, verify requirements are met",
+        "default_limits": "do not execute or modify code directly, only report findings",
+        "default_mission": "Supervise the output of other agents to catch mistakes and propose improvements before the user sees the result.",
+    },
+]
+
+
+def _run_default_agents_setup(app):
+    """Interactive creation/reconfiguration of the default agents.
+
+    Currently provisions two root agents: the orchestrator (``optimus``) and the
+    reviewer. Both get their SOUL.md / AGENTS.md / MEMORY.md generated from the
+    user's answers. Existing rows with the same slug are reused.
+    """
+    import click
+
+    created_agents = []
+    for spec in DEFAULT_AGENT_SPECS:
+        click.echo()
+        click.echo(f"  ── {spec['label']} agent ({spec['slug']}) ──")
+        agent = _provision_default_agent(app, spec)
+        if agent is not None:
+            created_agents.append(agent)
+
+    # Cross-reference the agents: record reviewer in optimus' AGENTS.md so the
+    # orchestrator knows who to route quality reviews to.
+    if len(created_agents) > 1:
+        from app.workspace.manager import write_file
+
+        slugs = {a.slug: a for a in created_agents}
+        optimus = slugs.get("optimus")
+        reviewer = slugs.get("reviewer")
+        if optimus and reviewer:
+            write_file(
+                optimus,
+                "AGENTS.md",
+                _render_agents_md(
+                    optimus.name,
+                    "Orchestrator — coordinates sub-agents and delegates tasks",
+                    peers=[(reviewer.name, reviewer.slug, "reviews outputs for errors and improvements")],
+                ),
+            )
+
+
+def _provision_default_agent(app, spec):
+    """Create or reconfigure a single default agent based on ``spec``."""
+    import click
+
+    from app.models.agent import Agent
+    from app.services import codex_auth
+    from app.services.agent_service import create_agent
+    from app.workspace.manager import write_file
+
+    existing = Agent.query.filter_by(slug=spec["slug"]).first()
+    if existing:
+        click.echo(f"  {spec['label']} '{existing.name}' already exists.")
+        if not click.confirm("  Reconfigure its workspace files?", default=False):
+            return existing
+        agent = existing
+    else:
+        name = click.prompt("  Agent name", default=spec["default_name"])
+        agent = create_agent({"name": name, "slug": spec["slug"]})
+        click.echo(f"  ✓ Agent '{agent.name}' created (slug={agent.slug}).")
+
+    available = codex_auth.list_models()
+    if available:
+        click.echo(f"  Available models: {', '.join(available)}")
+    current = agent.model_name or (available[0] if available else "gpt-5.2")
+    model_name = click.prompt("  Model", default=current)
+    if model_name and model_name != agent.model_name:
+        agent.model_name = model_name
+        db.session.commit()
+
+    click.echo("  Now let's shape the agent's identity. Leave blank to keep defaults.")
+
+    role = click.prompt("  Role (one line)", default=spec["default_role"])
+    tone = click.prompt("  Tone / style", default=spec["default_tone"])
+    priorities_raw = click.prompt(
+        "  Top priorities (comma-separated)", default=spec["default_priorities"]
+    )
+    limits_raw = click.prompt(
+        "  Hard limits (comma-separated)", default=spec["default_limits"]
+    )
+    mission = click.prompt(
+        "  Mission statement (what this agent is here to accomplish)",
+        default=spec["default_mission"],
+    )
+    initial_memory = click.prompt(
+        "  Initial memory (one key fact or context, optional)",
+        default="",
+        show_default=False,
+    )
+
+    priorities = [p.strip() for p in priorities_raw.split(",") if p.strip()]
+    limits = [p.strip() for p in limits_raw.split(",") if p.strip()]
+
+    soul = _render_soul(agent.name, role, tone, priorities, limits, mission)
+    agents_md = _render_agents_md(agent.name, role, type_label=spec["type_label"])
+    memory_md = _render_memory_md(initial_memory)
+
+    write_file(agent, "SOUL.md", soul)
+    write_file(agent, "AGENTS.md", agents_md)
+    write_file(agent, "MEMORY.md", memory_md)
+
+    click.echo(f"  ✓ Workspace files written to {agent.workspace_path}")
+    click.echo("    - SOUL.md, AGENTS.md, MEMORY.md")
+    return agent
+
+
+def _render_soul(name, role, tone, priorities, limits, mission):
+    priorities_block = "\n".join(f"- {p}" for p in priorities) or "- (none)"
+    limits_block = "\n".join(f"- {p}" for p in limits) or "- (none)"
+    return f"""# Soul — {name}
+
+## Identity
+{role}
+
+## Mission
+{mission}
+
+## Tone & Style
+{tone}
+
+## Principles
+{priorities_block}
+
+## Limits
+{limits_block}
+"""
+
+
+def _render_agents_md(name, role, type_label="orchestrator", peers=None):
+    peers_block = ""
+    if peers:
+        peers_block = "\n## Peer agents\n" + "\n".join(
+            f"- **{peer_name}** (`{peer_slug}`) — {peer_role}" for peer_name, peer_slug, peer_role in peers
+        ) + "\n"
+    return f"""# Agents
+
+## {name} ({type_label})
+- **Role:** {role}
+- **Type:** root / {type_label}
+- **Sub-agents:** none yet
+{peers_block}
+Sub-agents will be appended below as they are created.
+"""
+
+
+def _render_memory_md(initial_memory):
+    if initial_memory:
+        return f"""# Memory
+
+## Initial context
+- {initial_memory}
+"""
+    return """# Memory
+
+No memories recorded yet. Entries will be appended here as the agent learns.
+"""

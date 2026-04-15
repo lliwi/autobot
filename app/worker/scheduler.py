@@ -1,5 +1,4 @@
 import logging
-from datetime import datetime, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -8,14 +7,6 @@ from apscheduler.triggers.interval import IntervalTrigger
 logger = logging.getLogger(__name__)
 
 _scheduler = None
-
-HEARTBEAT_PROMPT = (
-    "[HEARTBEAT] Perform periodic maintenance:\n"
-    "1. Review recent errors and issues\n"
-    "2. Consolidate memory if needed\n"
-    "3. Check pending work\n"
-    "4. Report status summary"
-)
 
 
 def init_scheduler(app):
@@ -112,24 +103,22 @@ def _ensure_job(job_id, func, trigger, kwargs):
 
 
 def _execute_heartbeat(app, agent_id):
-    """Execute a heartbeat for an agent."""
-    with app.app_context():
-        from app.services.chat_service import run_agent_non_streaming
+    """Run one supervisor tick for an agent.
 
-        logger.info(f"Executing heartbeat for agent {agent_id}")
+    Delegates to ``heartbeat_supervisor.tick`` which builds a snapshot,
+    decides (skip/defer/act) and records a HeartbeatEvent.
+    """
+    with app.app_context():
+        from app.services import heartbeat_supervisor
+
         try:
-            result = run_agent_non_streaming(
-                agent_id=agent_id,
-                message=HEARTBEAT_PROMPT,
-                channel_type="internal",
-                trigger_type="heartbeat",
+            event = heartbeat_supervisor.tick(agent_id)
+            logger.info(
+                "heartbeat agent=%s decision=%s reason=%s run=%s",
+                agent_id, event.decision, event.reason, event.run_id,
             )
-            if result.get("error"):
-                logger.warning(f"Heartbeat agent {agent_id} error: {result['error']}")
-            else:
-                logger.info(f"Heartbeat agent {agent_id} completed")
         except Exception as e:
-            logger.error(f"Heartbeat agent {agent_id} failed: {e}")
+            logger.exception(f"Heartbeat tick failed for agent {agent_id}: {e}")
 
 
 def _execute_cron_task(app, task_id):

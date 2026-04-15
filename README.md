@@ -189,6 +189,8 @@ app/worker/
 | `skills` | Skills registradas por agente (manifest, estado, fuente) |
 | `tools` | Tools del workspace por agente (manifest, handler, timeout) |
 | `patch_proposals` | Propuestas de automejora con diff, snapshot, nivel de seguridad y estado |
+| `objectives` | Objetivos de trabajo del agente (goal-oriented, multi-run) |
+| `heartbeat_events` | Registro de cada tick del supervisor (decisión, razón, snapshot) |
 
 ### Runtime del agente
 
@@ -228,6 +230,41 @@ Cada agente tiene un directorio en `/workspaces/<slug>/`:
 | `AGENTS.md` | Catálogo de agentes/subagentes | Al crear/modificar agentes |
 | `MEMORY.md` | Memoria persistente resumida | Consolidación periódica |
 | `TOOLS.md` | Inventario de tools disponibles | Al registrar tools |
+| `HEARTBEAT.md` | Checklist declarativa que lee el supervisor cada tick | Editable por el usuario |
+
+### Heartbeat supervisor
+
+El heartbeat **no es un temporizador** — es el bucle de supervisión que mantiene
+al agente "vivo" entre interacciones. Cada tick hace cinco cosas:
+
+1. **Snapshot del mundo**: lee `HEARTBEAT.md`, consulta objetivos activos,
+   detecta `Run` atascadas (`status=running` durante más de 15 min → marca
+   `stuck`) e identifica el último canal activo (web / matrix).
+2. **Decisión por reglas** (sin LLM): si no hay nada accionable → `skip`; si
+   hay un `Run` vivo o acaba de actuar (< 60 s) → `defer`; si hay tasks vivas
+   u objetivos vencidos → `act`.
+3. **Ejecución contextualizada**: cuando decide actuar, construye un prompt
+   con el snapshot (no un prompt estático) y lanza un `Run` con
+   `trigger_type=heartbeat`, enrutado al último canal activo.
+4. **Telemetría**: cada tick (`act` / `skip` / `defer`) queda registrado en
+   `heartbeat_events` con el snapshot y el `run_id` si hubo ejecución.
+5. **Cadencia**: el intervalo (minutos) se configura por agente en
+   `agents.heartbeat_interval`; APScheduler dispara `_execute_heartbeat` que
+   delega en `app.services.heartbeat_supervisor.tick(agent_id)`.
+
+**Sintaxis de `HEARTBEAT.md`**: cada entrada es un `- item` con directivas
+opcionales inline:
+
+```markdown
+- Revisar errores recientes. every: 2h priority: high
+- [done] Tarea antigua (ignorada por el supervisor)
+- Consolidar MEMORY.md si está ruidosa. every: 1d priority: low
+```
+
+**Objectives** (tabla `objectives`): unidad de trabajo multi-run que sobrevive
+entre interacciones. Estados: `active`, `blocked`, `waiting`, `done`,
+`cancelled`. El supervisor sólo considera los `active` cuyo `next_check_at`
+haya vencido (o sea `NULL`). Se gestionan desde `/agents/<id>/heartbeat`.
 
 ## API
 
@@ -266,6 +303,13 @@ Cada agente tiene un directorio en `/workspaces/<slug>/`:
 - `PUT /api/scheduled-tasks/:id` — Actualizar
 - `DELETE /api/scheduled-tasks/:id` — Eliminar
 - `POST /api/scheduled-tasks/:id/toggle` — Activar/desactivar
+
+### Heartbeat & Objectives (dashboard)
+- `GET  /agents/:id/heartbeat` — Panel con objetivos, últimos ticks y `HEARTBEAT.md`
+- `POST /agents/:id/heartbeat/tick` — Disparar un tick manual del supervisor
+- `POST /agents/:id/objectives/create` — Crear un objetivo (`title`, `description`)
+- `POST /objectives/:id/update` — Actualizar estado (`active`/`blocked`/`waiting`/`done`/`cancelled`)
+- `POST /objectives/:id/delete` — Eliminar un objetivo
 
 ### Self-improvement (patches)
 - `GET /api/patches` — Listar patches (filtrable por `agent_id`, `status`)
