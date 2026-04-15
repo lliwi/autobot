@@ -32,8 +32,18 @@ def create_agent(data):
         slug=slug,
         model_name=model_name,
         workspace_path=workspace_path,
-        oauth_profile_id=data.get("oauth_profile_id"),
     )
     db.session.add(agent)
+    db.session.commit()
+    return agent
+
+
+def update_agent(agent, data):
+    if "name" in data and data["name"]:
+        agent.name = data["name"]
+    if "model_name" in data and data["model_name"]:
+        agent.model_name = data["model_name"]
+    if "status" in data and data["status"] in ("active", "inactive"):
+        agent.status = data["status"]
     db.session.commit()
     return agent

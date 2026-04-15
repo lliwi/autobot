@@ -18,9 +18,6 @@
     <div class="detail-item">
         <strong>Workspace:</strong> <code>{{ agent.workspace_path }}</code>
     </div>
-    <div class="detail-item">
-        <strong>OAuth Profile:</strong> {{ agent.oauth_profile_id or 'Not configured' }}
-    </div>
     {% if agent.parent_agent %}
     <div class="detail-item">
         <strong>Parent:</strong> <a href="{{ url_for('dashboard.agent_detail', agent_id=agent.parent_agent.id) }}">{{ agent.parent_agent.name }}</a>
@@ -34,6 +31,7 @@
 </div>
 
 <div class="section" style="margin-top: 1rem;">
+    <a href="{{ url_for('dashboard.agent_edit', agent_id=agent.id) }}" class="btn btn-primary">Edit</a>
     <a href="{{ url_for('dashboard.skills_list', agent_id=agent.id) }}" class="btn">Skills</a>
     <a href="{{ url_for('dashboard.tools_list', agent_id=agent.id) }}" class="btn">Tools</a>
     <a href="{{ url_for('dashboard.subagents_list', agent_id=agent.id) }}" class="btn">Sub-agents</a>

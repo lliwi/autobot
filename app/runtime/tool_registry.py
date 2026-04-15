@@ -104,6 +104,58 @@ def register_builtin_tools():
         )
     )
 
+    register(
+        ToolDefinition(
+            name="propose_change",
+            description=(
+                "Propose a change to a workspace file. For level-1 targets (MEMORY.md, "
+                "new skills/tools) the change is auto-applied. For level-2 targets "
+                "(existing code, AGENTS.md, TOOLS.md) it requires admin approval. "
+                "Level-3 targets (core, OAuth, DB) are prohibited."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "target_path": {
+                        "type": "string",
+                        "description": "Relative path within the workspace (e.g. 'MEMORY.md', 'skills/my-skill/skill.py').",
+                    },
+                    "new_content": {
+                        "type": "string",
+                        "description": "The complete new content for the file.",
+                    },
+                    "title": {
+                        "type": "string",
+                        "description": "Short title describing the change.",
+                    },
+                    "reason": {
+                        "type": "string",
+                        "description": "Why this change is needed.",
+                    },
+                },
+                "required": ["target_path", "new_content", "title", "reason"],
+            },
+            handler=lambda **kwargs: _propose_change(**kwargs),
+        )
+    )
+
+    register(
+        ToolDefinition(
+            name="list_patches",
+            description="List recent patch proposals for this agent, optionally filtered by status.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "status": {
+                        "type": "string",
+                        "description": "Filter by status: pending_review, approved, applied, rejected, rolled_back.",
+                    },
+                },
+            },
+            handler=lambda **kwargs: _list_patches(**kwargs),
+        )
+    )
+
 
 def _read_workspace_file(filename, _agent=None, **kwargs):
     if _agent is None:
@@ -141,5 +193,55 @@ def _list_subagents(_agent=None, **kwargs):
         "subagents": [
             {"id": a.id, "name": a.name, "slug": a.slug, "status": a.status}
             for a in subagents
+        ]
+    }
+
+
+def _propose_change(target_path, new_content, title, reason, _agent=None, _run_id=None, **kwargs):
+    if _agent is None:
+        return {"error": "No agent context"}
+    from app.services.patch_service import propose_change
+
+    try:
+        patch = propose_change(
+            agent_id=_agent.id,
+            target_path=target_path,
+            new_content=new_content,
+            title=title,
+            reason=reason,
+            run_id=_run_id,
+        )
+        return {
+            "patch_id": patch.id,
+            "status": patch.status,
+            "security_level": patch.security_level,
+            "target_path": patch.target_path,
+            "message": (
+                "Change auto-applied." if patch.status == "applied"
+                else "Change queued for admin review." if patch.status == "pending_review"
+                else f"Change rejected: {(patch.test_result_json or {}).get('error', 'unknown')}"
+            ),
+        }
+    except ValueError as e:
+        return {"error": str(e)}
+
+
+def _list_patches(_agent=None, status=None, **kwargs):
+    if _agent is None:
+        return {"error": "No agent context"}
+    from app.services.patch_service import list_patches
+
+    patches = list_patches(agent_id=_agent.id, status=status)
+    return {
+        "patches": [
+            {
+                "id": p.id,
+                "title": p.title,
+                "target_path": p.target_path,
+                "status": p.status,
+                "security_level": p.security_level,
+                "created_at": p.created_at.isoformat() if p.created_at else None,
+            }
+            for p in patches[:20]
         ]
     }

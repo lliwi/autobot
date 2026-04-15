@@ -19,7 +19,31 @@
       "Bash(git fetch:*)",
       "Bash(git rebase:*)",
       "Bash(git checkout:*)",
-      "Bash(wc -l /home/llibert/Documents/development/flask/autobot/app/runtime/*.py)"
+      "Bash(wc -l /home/llibert/Documents/development/flask/autobot/app/runtime/*.py)",
+      "Bash(docker cp:*)",
+      "Bash(curl -sI http://localhost:5000/oauth/codex/connect)",
+      "Bash(gh api:*)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:pypi.org)",
+      "Read(//home/llibert/.local/share/oauth-cli-kit/**)",
+      "Bash(curl -fsSL https://raw.githubusercontent.com/HKUDS/nanobot/main/nanobot/providers/openai_responses/parsing.py -o /tmp/nanobot_parsing.py)",
+      "Bash(curl -fsSL \"https://api.github.com/search/code?q=repo:openai/codex+%22gpt-%22+model\" -H \"Accept: application/vnd.github+json\")",
+      "Bash(curl -fsSL \"https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/default_client.rs\" -o /tmp/dc.rs)",
+      "Bash(curl -fsSL \"https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/client_common.rs\" -o /tmp/cc.rs)",
+      "Bash(curl -fsSL \"https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/openai_model_info.rs\" -o /tmp/om.rs)",
+      "Bash(curl -fsSL https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/config/__TRACKED_VAR__)",
+      "Bash(curl -fsSL \"https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/config/mod.rs\")",
+      "Bash(curl -fsSL \"https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/config_types.rs\")",
+      "Bash(curl -fsSL \"https://raw.githubusercontent.com/openai/codex/main/codex-rs/common/src/lib.rs\")",
+      "Bash(curl -fsSL \"https://raw.githubusercontent.com/openai/codex/main/docs/config.md\")",
+      "Bash(curl -fsSL \"https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/config.schema.json\")",
+      "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('properties',{}\\).get\\('model',{}\\), indent=2\\)\\); print\\('---'\\); print\\(json.dumps\\(d.get\\('properties',{}\\).get\\('default_model',{}\\), indent=2\\)\\)\")",
+      "Bash(curl -fsSL \"https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/openai_model_info.rs\")",
+      "Bash(curl -fsSL \"https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/lib.rs\")"
+    ],
+    "additionalDirectories": [
+      "/tmp"
     ]
   }
 }

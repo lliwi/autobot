@@ -11,8 +11,7 @@ class Agent(db.Model):
     slug = db.Column(db.String(255), unique=True, nullable=False, index=True)
     status = db.Column(db.String(50), nullable=False, default="inactive")
     workspace_path = db.Column(db.String(512), nullable=False)
-    model_name = db.Column(db.String(100), nullable=False, default="o4-mini")
-    oauth_profile_id = db.Column(db.Integer, db.ForeignKey("oauth_profiles.id"), nullable=True)
+    model_name = db.Column(db.String(100), nullable=False, default="gpt-5.2")
     parent_agent_id = db.Column(db.Integer, db.ForeignKey("agents.id"), nullable=True)
     heartbeat_interval = db.Column(db.Integer, nullable=True, default=15)  # minutes, null = disabled
     group_response_policy = db.Column(db.String(50), nullable=False, default="mention")  # always, mention, allowlist
@@ -25,7 +24,6 @@ class Agent(db.Model):
     )
 
     # Relationships
-    oauth_profile = db.relationship("OAuthProfile", backref="agents")
     parent_agent = db.relationship("Agent", remote_side=[id], backref="children")
     sessions = db.relationship("Session", backref="agent", lazy="dynamic")
     runs = db.relationship("Run", backref="agent", lazy="dynamic")
@@ -38,7 +36,6 @@ class Agent(db.Model):
             "status": self.status,
             "workspace_path": self.workspace_path,
             "model_name": self.model_name,
-            "oauth_profile_id": self.oauth_profile_id,
             "parent_agent_id": self.parent_agent_id,
             "heartbeat_interval": self.heartbeat_interval,
             "group_response_policy": self.group_response_policy,

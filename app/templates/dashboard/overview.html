@@ -7,6 +7,34 @@
     <h1>Overview</h1>
 </div>
 
+<div class="section" style="margin-bottom: 1rem;">
+    <h2>OpenAI Codex</h2>
+    {% if codex_logged_in %}
+    <div class="detail-grid">
+        <div class="detail-item">
+            <strong>Estado:</strong>
+            <span class="badge badge-active">Conectado</span>
+        </div>
+        <div class="detail-item">
+            <strong>Account ID:</strong> <code>{{ codex_account_id or '-' }}</code>
+        </div>
+        <div class="detail-item">
+            <strong>Token:</strong> <code>{{ codex_token_path }}</code>
+        </div>
+        <div class="detail-item">
+            <form method="POST" action="{{ url_for('dashboard.oauth_codex_logout') }}" style="display:inline;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn">Desconectar</button>
+            </form>
+        </div>
+    </div>
+    {% else %}
+    <p>Codex todavía no está autenticado. Ejecuta el login desde la terminal:</p>
+    <pre class="workspace-content">docker compose exec web flask codex-login</pre>
+    <p class="empty-state">El comando imprime una URL — ábrela en el navegador para autorizar con tu cuenta de ChatGPT (Plus/Pro/Team).</p>
+    {% endif %}
+</div>
+
 <div class="stats-grid">
     <div class="stat-card">
         <div class="stat-value">{{ agents_count }}</div>

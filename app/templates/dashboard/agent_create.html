@@ -15,7 +15,19 @@
     </div>
     <div class="form-group">
         <label for="model_name">Model</label>
-        <input type="text" id="model_name" name="model_name" value="o4-mini" placeholder="o4-mini">
+        {% if available_models %}
+        <select id="model_name" name="model_name" required>
+            {% for model in available_models %}
+            <option value="{{ model }}">{{ model }}</option>
+            {% endfor %}
+        </select>
+        {% if not codex_logged_in %}
+        <small class="help-text">Codex no está autenticado — mostrando lista por defecto. Ejecuta <code>flask codex-login</code> para ver tus modelos reales.</small>
+        {% endif %}
+        {% else %}
+        <input type="text" id="model_name" name="model_name" required placeholder="gpt-5.2">
+        <small class="help-text">No se pudieron obtener modelos desde Codex. Introduce el ID manualmente.</small>
+        {% endif %}
     </div>
     <div class="form-actions">
         <button type="submit" class="btn btn-primary">Create</button>

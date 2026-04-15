@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block title %}Patch #{{ patch.id }} — {{ patch.title }} - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Patch #{{ patch.id }}</h1>
+    <a href="{{ url_for('dashboard.patches_list') }}" class="btn">Back to Patches</a>
+</div>
+
+<div class="detail-grid">
+    <div class="detail-item">
+        <strong>Title:</strong> {{ patch.title }}
+    </div>
+    <div class="detail-item">
+        <strong>Agent:</strong>
+        {% if patch.agent %}
+        <a href="{{ url_for('dashboard.agent_detail', agent_id=patch.agent.id) }}">{{ patch.agent.name }}</a>
+        {% else %}-{% endif %}
+    </div>
+    <div class="detail-item">
+        <strong>Target:</strong> <code>{{ patch.target_path }}</code> ({{ patch.target_type }})
+    </div>
+    <div class="detail-item">
+        <strong>Security Level:</strong>
+        <span class="badge badge-{{ 'active' if patch.security_level == 1 else 'warning' if patch.security_level == 2 else 'error' }}">
+            Level {{ patch.security_level }}
+            {% if patch.security_level == 1 %} (auto)
+            {% elif patch.security_level == 2 %} (review)
+            {% else %} (prohibited)
+            {% endif %}
+        </span>
+    </div>
+    <div class="detail-item">
+        <strong>Status:</strong>
+        <span class="badge badge-{{ 'active' if patch.status == 'applied' else 'warning' if patch.status == 'pending_review' else 'inactive' if patch.status in ('rejected', 'rolled_back') else 'info' }}">
+            {{ patch.status }}
+        </span>
+    </div>
+    <div class="detail-item">
+        <strong>Created:</strong> {{ patch.created_at.strftime('%Y-%m-%d %H:%M:%S') if patch.created_at else '-' }}
+    </div>
+    {% if patch.applied_at %}
+    <div class="detail-item">
+        <strong>Applied:</strong> {{ patch.applied_at.strftime('%Y-%m-%d %H:%M:%S') }}
+    </div>
+    {% endif %}
+    {% if patch.run_id %}
+    <div class="detail-item">
+        <strong>Run:</strong> #{{ patch.run_id }}
+    </div>
+    {% endif %}
+</div>
+
+<div class="section">
+    <h2>Reason</h2>
+    <pre class="workspace-content">{{ patch.reason }}</pre>
+</div>
+
+<div class="section">
+    <h2>Diff</h2>
+    {% if patch.diff_text %}
+    <pre class="workspace-content" style="font-family: monospace; white-space: pre-wrap;">{{ patch.diff_text }}</pre>
+    {% else %}
+    <p class="empty-state">No diff available (new file or prohibited change).</p>
+    {% endif %}
+</div>
+
+{% if patch.test_result_json %}
+<div class="section">
+    <h2>Test Results</h2>
+    <pre class="workspace-content">{{ patch.test_result_json | tojson(indent=2) }}</pre>
+</div>
+{% endif %}
+
+<div class="section" style="margin-top: 1rem;">
+    {% if patch.status == 'pending_review' %}
+    <form method="POST" action="{{ url_for('dashboard.patch_approve', patch_id=patch.id) }}" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-primary">Approve</button>
+    </form>
+    <form method="POST" action="{{ url_for('dashboard.patch_reject', patch_id=patch.id) }}" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn">Reject</button>
+    </form>
+    {% elif patch.status == 'approved' %}
+    <form method="POST" action="{{ url_for('dashboard.patch_apply', patch_id=patch.id) }}" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn btn-primary">Apply</button>
+    </form>
+    <form method="POST" action="{{ url_for('dashboard.patch_reject', patch_id=patch.id) }}" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn">Reject</button>
+    </form>
+    {% elif patch.status == 'applied' %}
+    <form method="POST" action="{{ url_for('dashboard.patch_rollback', patch_id=patch.id) }}" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn">Rollback</button>
+    </form>
+    {% endif %}
+</div>
+{% endblock %}

@@ -112,24 +112,70 @@ def register_cli(app):
             click.echo(f"  TOKEN_ENCRYPTION_KEY={new_key}")
         click.echo()
 
-        # 4. OAuth config
-        click.echo("[4/4] OpenAI Codex OAuth configuration")
-        client_id = app.config.get("OPENAI_CLIENT_ID", "")
-        if client_id:
-            click.echo(f"  OPENAI_CLIENT_ID is set: {client_id[:8]}...")
-        else:
-            click.echo("  OPENAI_CLIENT_ID is not configured.")
-            click.echo("  To enable chat with OpenAI Codex, add these to your .env:")
-            click.echo("    OPENAI_CLIENT_ID=<your-client-id>")
-            click.echo("    OPENAI_CLIENT_SECRET=<your-client-secret>")
-            click.echo("    OPENAI_REDIRECT_URI=http://localhost:5000/api/oauth/openai/callback")
+        # 4. OAuth config + interactive login
+        click.echo("[4/4] OpenAI Codex OAuth")
+        _run_codex_login(app)
         click.echo()
 
         click.echo("=" * 50)
         click.echo("  Setup complete!")
         click.echo()
-        click.echo("  Next steps:")
-        click.echo("    1. Review/update your .env file")
-        click.echo("    2. Restart: docker compose restart web")
-        click.echo("    3. Open http://localhost:5000")
+        click.echo("  Open http://localhost:5000")
         click.echo("=" * 50)
+
+    @app.cli.command("codex-login")
+    def codex_login():
+        """Run the Codex OAuth/PKCE flow. Prints the authorize URL and waits for the browser callback."""
+        _run_codex_login(app)
+
+    @app.cli.command("codex-logout")
+    def codex_logout():
+        """Delete the stored Codex token."""
+        from app.services import codex_auth
+
+        if codex_auth.logout():
+            click.echo("  Codex token removed.")
+        else:
+            click.echo("  No Codex token to remove.")
+
+    @app.cli.command("codex-status")
+    def codex_status():
+        """Show current Codex login status."""
+        from app.services import codex_auth
+
+        if codex_auth.is_logged_in():
+            click.echo(f"  Logged in (token: {codex_auth.token_path()})")
+            click.echo(f"  Account id: {codex_auth.get_account_id() or '-'}")
+        else:
+            click.echo("  Not logged in. Run `flask codex-login` to connect.")
+
+
+def _run_codex_login(app):
+    """Interactive Codex OAuth/PKCE flow.
+
+    Uses oauth_cli_kit: launches a local HTTP server on port 1455, prints the
+    authorize URL, and blocks until the browser callback arrives.
+    """
+    import click
+
+    from app.services import codex_auth
+
+    if codex_auth.is_logged_in():
+        click.echo(f"  Already logged in as account {codex_auth.get_account_id() or '?'}.")
+        if not click.confirm("  Re-authenticate?", default=False):
+            return
+
+    click.echo()
+    click.echo("  Starting Codex OAuth flow...")
+    click.echo("  A local callback server will run on http://localhost:1455/auth/callback.")
+    click.echo("  Follow the URL below in your browser — keep this terminal open until login finishes.")
+    click.echo()
+
+    try:
+        token = codex_auth.login(print_fn=lambda s: click.echo(f"    {s}"), prompt_fn=input)
+    except Exception as e:
+        click.echo(f"  ✗ Login failed: {e}")
+        return
+
+    click.echo()
+    click.echo(f"  ✓ Codex connected. account_id={token.account_id}")

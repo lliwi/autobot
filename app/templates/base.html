@@ -19,6 +19,7 @@
                 <li><a href="{{ url_for('dashboard.chat') }}" class="{% if request.endpoint == 'dashboard.chat' %}active{% endif %}">Chat</a></li>
                 <li><a href="{{ url_for('dashboard.agents_list') }}" class="{% if request.endpoint and 'agent' in request.endpoint and 'topology' not in request.endpoint %}active{% endif %}">Agents</a></li>
                 <li><a href="{{ url_for('dashboard.topology') }}" class="{% if request.endpoint == 'dashboard.topology' %}active{% endif %}">Topology</a></li>
+                <li><a href="{{ url_for('dashboard.patches_list') }}" class="{% if request.endpoint and 'patch' in request.endpoint %}active{% endif %}">Patches</a></li>
                 <li><a href="{{ url_for('dashboard.scheduler_list') }}" class="{% if request.endpoint and 'scheduler' in request.endpoint %}active{% endif %}">Scheduler</a></li>
                 <li><a href="{{ url_for('dashboard.metrics') }}" class="{% if request.endpoint == 'dashboard.metrics' %}active{% endif %}">Metrics</a></li>
             </ul>

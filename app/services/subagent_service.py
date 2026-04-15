@@ -24,11 +24,6 @@ def create_subagent(parent_agent_id, data):
 
     agent = create_agent(data)
     agent.parent_agent_id = parent.id
-
-    # Inherit OAuth profile if not explicitly set
-    if agent.oauth_profile_id is None and parent.oauth_profile_id is not None:
-        agent.oauth_profile_id = parent.oauth_profile_id
-
     db.session.commit()
 
     # Register sub-agent in parent's AGENTS.md

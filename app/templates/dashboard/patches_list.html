@@ -1,0 +1,89 @@
+{% extends "base.html" %}
+
+{% block title %}Patches - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Patch Proposals</h1>
+</div>
+
+<div class="filters" style="margin-bottom: 1rem;">
+    <form method="GET" style="display: flex; gap: 0.5rem; align-items: center;">
+        <select name="agent_id" class="form-control" style="max-width: 200px;">
+            <option value="">All agents</option>
+            {% for agent in agents %}
+            <option value="{{ agent.id }}" {% if filter_agent_id == agent.id %}selected{% endif %}>{{ agent.name }}</option>
+            {% endfor %}
+        </select>
+        <select name="status" class="form-control" style="max-width: 200px;">
+            <option value="">All statuses</option>
+            {% for s in ['pending_review', 'approved', 'applied', 'rejected', 'rolled_back'] %}
+            <option value="{{ s }}" {% if filter_status == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-sm">Filter</button>
+    </form>
+</div>
+
+{% if patches %}
+<table class="table">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Title</th>
+            <th>Target</th>
+            <th>Level</th>
+            <th>Status</th>
+            <th>Agent</th>
+            <th>Created</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for patch in patches %}
+        <tr>
+            <td>{{ patch.id }}</td>
+            <td><a href="{{ url_for('dashboard.patch_detail', patch_id=patch.id) }}">{{ patch.title }}</a></td>
+            <td><code>{{ patch.target_path }}</code><br><small>{{ patch.target_type }}</small></td>
+            <td>
+                <span class="badge badge-{{ 'active' if patch.security_level == 1 else 'warning' if patch.security_level == 2 else 'error' }}">
+                    L{{ patch.security_level }}
+                </span>
+            </td>
+            <td>
+                <span class="badge badge-{{ 'active' if patch.status == 'applied' else 'warning' if patch.status == 'pending_review' else 'inactive' if patch.status in ('rejected', 'rolled_back') else 'info' }}">
+                    {{ patch.status }}
+                </span>
+            </td>
+            <td>{{ patch.agent.name if patch.agent else '-' }}</td>
+            <td>{{ patch.created_at.strftime('%Y-%m-%d %H:%M') if patch.created_at else '-' }}</td>
+            <td>
+                {% if patch.status == 'pending_review' %}
+                <form method="POST" action="{{ url_for('dashboard.patch_approve', patch_id=patch.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-primary">Approve</button>
+                </form>
+                <form method="POST" action="{{ url_for('dashboard.patch_reject', patch_id=patch.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm">Reject</button>
+                </form>
+                {% elif patch.status == 'approved' %}
+                <form method="POST" action="{{ url_for('dashboard.patch_apply', patch_id=patch.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-primary">Apply</button>
+                </form>
+                {% elif patch.status == 'applied' %}
+                <form method="POST" action="{{ url_for('dashboard.patch_rollback', patch_id=patch.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm">Rollback</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="empty-state">No patch proposals yet. Patches are created when an agent uses the <code>propose_change</code> tool.</p>
+{% endif %}
+{% endblock %}

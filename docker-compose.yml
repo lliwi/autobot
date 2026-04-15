@@ -5,8 +5,10 @@ services:
       dockerfile: Dockerfile.dev
     ports:
       - "5000:5000"
+      - "1455:1455"
     volumes:
       - .:/app
+      - codex_auth:/root/.local/share/oauth-cli-kit
     env_file:
       - .env
     depends_on:
@@ -19,6 +21,7 @@ services:
       dockerfile: Dockerfile.dev
     volumes:
       - .:/app
+      - codex_auth:/root/.local/share/oauth-cli-kit
     env_file:
       - .env
     depends_on:
@@ -48,3 +51,4 @@ services:
 volumes:
   pgdata:
   redisdata:
+  codex_auth:

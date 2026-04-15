@@ -148,12 +148,12 @@ app/
 ├── config.py            # Configuración por entorno
 ├── extensions.py        # SQLAlchemy, Flask-Login, Bcrypt, CSRF
 ├── logging_config.py    # JSON logging estructurado a stdout
-├── models/              # SQLAlchemy: User, Agent, Session, Message, Run, ToolExecution, OAuthProfile, ScheduledTask, Skill, Tool
-├── api/                 # Blueprints REST: auth, agents, chat (SSE), runs, oauth, scheduler, metrics, skills, tools, subagents
+├── models/              # SQLAlchemy: User, Agent, Session, Message, Run, ToolExecution, OAuthProfile, ScheduledTask, Skill, Tool, PatchProposal
+├── api/                 # Blueprints REST: auth, agents, chat (SSE), runs, oauth, scheduler, metrics, skills, tools, subagents, patches
 │   ├── middleware.py    # Decoradores auth_required, admin_required
 │   └── errors.py       # Manejadores de error JSON
-├── dashboard/           # Vistas HTMX: overview, agents, chat, scheduler, metrics, skills, tools, topology, subagents
-├── services/            # Lógica de negocio: auth, agent, session, chat, run, oauth, scheduler, metrics, matrix, skill, tool, subagent
+├── dashboard/           # Vistas HTMX: overview, agents, chat, scheduler, metrics, skills, tools, topology, subagents, patches
+├── services/            # Lógica de negocio: auth, agent, session, chat, run, oauth, scheduler, metrics, matrix, skill, tool, subagent, patch, security_policy
 ├── runtime/             # Motor del agente
 │   ├── context_builder.py  # Ensambla system prompt desde workspace + historial
 │   ├── model_client.py     # Wrapper OpenAI SDK con streaming
@@ -188,6 +188,7 @@ app/worker/
 | `scheduled_tasks` | Tareas programadas (cron, heartbeat, one-shot) |
 | `skills` | Skills registradas por agente (manifest, estado, fuente) |
 | `tools` | Tools del workspace por agente (manifest, handler, timeout) |
+| `patch_proposals` | Propuestas de automejora con diff, snapshot, nivel de seguridad y estado |
 
 ### Runtime del agente
 
@@ -214,6 +215,8 @@ El flujo de una interacción por chat:
 | `get_current_time` | Devuelve fecha y hora UTC actual |
 | `delegate_task` | Delega una tarea a un sub-agente y devuelve el resultado |
 | `list_subagents` | Lista los sub-agentes disponibles para delegación |
+| `propose_change` | Propone un cambio a un fichero del workspace (auto-aplica L1, espera aprobación L2, rechaza L3) |
+| `list_patches` | Lista propuestas de cambio recientes del agente |
 
 ### Workspace de agente
 
@@ -264,6 +267,14 @@ Cada agente tiene un directorio en `/workspaces/<slug>/`:
 - `DELETE /api/scheduled-tasks/:id` — Eliminar
 - `POST /api/scheduled-tasks/:id/toggle` — Activar/desactivar
 
+### Self-improvement (patches)
+- `GET /api/patches` — Listar patches (filtrable por `agent_id`, `status`)
+- `GET /api/patches/:id` — Detalle con diff completo
+- `POST /api/patches/:id/approve` — Aprobar patch L2 pendiente
+- `POST /api/patches/:id/reject` — Rechazar patch
+- `POST /api/patches/:id/apply` — Aplicar patch aprobado al workspace
+- `POST /api/patches/:id/rollback` — Revertir patch aplicado usando snapshot
+
 ### Sub-agents
 - `GET /api/agents/:id/subagents` — Listar sub-agentes de un agente
 - `POST /api/agents/:id/subagents` — Crear sub-agente (`{"name": "...", "role": "..."}`)
@@ -309,5 +320,5 @@ Cada agente tiene un directorio en `/workspaces/<slug>/`:
 - [x] **Fase 2 — Canales y Scheduler**: Matrix, heartbeat, cron, métricas completas, worker service
 - [x] **Fase 3 — Skills y Tools**: modelos Skill/Tool, registro dinámico, descubrimiento desde workspace, validación de manifiestos, carga dinámica de handlers, integración con runtime, panel dashboard
 - [x] **Fase 4 — Multiagente**: creación de sub-agentes, herencia de OAuth, delegación de tareas (síncrona), tools delegate_task/list_subagents, topología en dashboard, trazabilidad parent_run_id
-- [ ] **Fase 5 — Automejora**: patch proposals, diffs, tests, aprobación/rollback
+- [x] **Fase 5 — Automejora**: modelo PatchProposal, motor de política de seguridad (L1/L2/L3), servicio de patches con diff unificado, snapshots y rollback, tools `propose_change`/`list_patches`, API y dashboard de aprobación
 - [ ] **Fase 6 — Hardening**: sandbox, observabilidad avanzada, límites finos

@@ -1,0 +1,48 @@
+{% extends "base.html" %}
+
+{% block title %}Edit {{ agent.name }} - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Edit Agent</h1>
+</div>
+
+<form method="POST" class="form-card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <div class="form-group">
+        <label for="name">Name</label>
+        <input type="text" id="name" name="name" required value="{{ agent.name }}">
+    </div>
+    <div class="form-group">
+        <label>Slug</label>
+        <input type="text" value="{{ agent.slug }}" disabled>
+        <small class="help-text">El slug no se puede cambiar.</small>
+    </div>
+    <div class="form-group">
+        <label for="model_name">Model</label>
+        {% if available_models %}
+        <select id="model_name" name="model_name" required>
+            {% for model in available_models %}
+            <option value="{{ model }}" {% if model == agent.model_name %}selected{% endif %}>{{ model }}</option>
+            {% endfor %}
+        </select>
+        {% if not codex_logged_in %}
+        <small class="help-text">Codex no está autenticado — mostrando lista por defecto.</small>
+        {% endif %}
+        {% else %}
+        <input type="text" id="model_name" name="model_name" required value="{{ agent.model_name }}">
+        {% endif %}
+    </div>
+    <div class="form-group">
+        <label for="status">Status</label>
+        <select id="status" name="status">
+            <option value="active" {% if agent.status == 'active' %}selected{% endif %}>active</option>
+            <option value="inactive" {% if agent.status == 'inactive' %}selected{% endif %}>inactive</option>
+        </select>
+    </div>
+    <div class="form-actions">
+        <button type="submit" class="btn btn-primary">Save</button>
+        <a href="{{ url_for('dashboard.agent_detail', agent_id=agent.id) }}" class="btn">Cancel</a>
+    </div>
+</form>
+{% endblock %}
