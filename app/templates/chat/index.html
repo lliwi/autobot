@@ -12,6 +12,10 @@
             <option value="{{ agent.id }}">{{ agent.name }}</option>
             {% endfor %}
         </select>
+        <label class="chat-toggle">
+            <input type="checkbox" id="hide-tool-toggle">
+            <span>Hide tool activity</span>
+        </label>
     </div>
 
     <div id="messages" class="chat-messages">

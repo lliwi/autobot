@@ -6,9 +6,22 @@ document.addEventListener('DOMContentLoaded', () => {
     const messagesDiv = document.getElementById('messages');
 
     const LAST_AGENT_KEY = 'autobot.chat.lastAgentId';
+    const HIDE_TOOL_KEY = 'autobot.chat.hideTool';
+    const hideToolToggle = document.getElementById('hide-tool-toggle');
 
     let sessionId = null;
     let streaming = false;
+
+    function applyHideTool() {
+        messagesDiv.classList.toggle('hide-tool', hideToolToggle.checked);
+    }
+
+    hideToolToggle.checked = localStorage.getItem(HIDE_TOOL_KEY) === '1';
+    applyHideTool();
+    hideToolToggle.addEventListener('change', () => {
+        localStorage.setItem(HIDE_TOOL_KEY, hideToolToggle.checked ? '1' : '0');
+        applyHideTool();
+    });
 
     async function loadHistory(agentId) {
         sessionId = null;

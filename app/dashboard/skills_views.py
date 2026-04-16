@@ -7,9 +7,48 @@ from app.models.agent import Agent
 from app.services.skill_service import (
     list_skills,
     reload_skill,
+    share_skill,
     sync_agent_skills,
     toggle_skill,
 )
+
+
+@dashboard_bp.route("/skills")
+@login_required
+def skills_overview():
+    """Catalog of every skill across all agents, groupable by slug (shared copies)."""
+    skills = list_skills()
+    agents = Agent.query.order_by(Agent.name).all()
+
+    groups: dict[str, dict] = {}
+    for s in skills:
+        g = groups.setdefault(s.slug, {"slug": s.slug, "name": s.name, "items": []})
+        g["items"].append(s)
+        if s.name and not g["name"]:
+            g["name"] = s.name
+    grouped = sorted(groups.values(), key=lambda g: g["name"].lower())
+
+    return render_template(
+        "dashboard/skills_overview.html",
+        grouped=grouped,
+        agents=agents,
+    )
+
+
+@dashboard_bp.route("/skills/<int:skill_id>/share", methods=["POST"])
+@login_required
+def skill_share(skill_id):
+    target_id = request.form.get("target_agent_id", type=int)
+    if not target_id:
+        flash("Target agent is required.", "danger")
+        return redirect(url_for("dashboard.skills_overview"))
+    try:
+        copy = share_skill(skill_id, target_id)
+    except ValueError as e:
+        flash(str(e), "danger")
+        return redirect(url_for("dashboard.skills_overview"))
+    flash(f"Skill '{copy.name}' copied to agent '{copy.agent.name}'.", "success")
+    return redirect(url_for("dashboard.skills_overview"))
 
 
 @dashboard_bp.route("/agents/<int:agent_id>/skills")

@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+
+{% block title %}Skills - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Skills catalog</h1>
+    <small>{{ grouped|length }} skill slug(s) across {{ agents|length }} agent(s). Share a skill to copy it into another agent's workspace.</small>
+</div>
+
+{% if grouped %}
+<table class="table">
+    <thead>
+        <tr>
+            <th>Skill</th>
+            <th>Version</th>
+            <th>Owned by</th>
+            <th>Share to</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for g in grouped %}
+        {% for skill in g['items'] %}
+        <tr>
+            {% if loop.first %}
+            <td rowspan="{{ g['items']|length }}">
+                <strong>{{ g['name'] }}</strong><br>
+                <small><code>{{ g['slug'] }}</code></small>
+                {% if skill.description %}<br><small>{{ skill.description }}</small>{% endif %}
+            </td>
+            {% endif %}
+            <td>{{ skill.version }}</td>
+            <td>
+                <a href="{{ url_for('dashboard.skills_list', agent_id=skill.agent_id) }}">{{ skill.agent.name }}</a>
+                <span class="badge badge-{{ 'active' if skill.enabled else 'inactive' }}">{{ 'enabled' if skill.enabled else 'disabled' }}</span>
+            </td>
+            <td>
+                {% set target_ids = g['items']|map(attribute='agent_id')|list %}
+                {% set candidates = agents|rejectattr('id', 'in', target_ids)|list %}
+                {% if candidates %}
+                <form method="POST" action="{{ url_for('dashboard.skill_share', skill_id=skill.id) }}" style="display:inline-flex; gap:0.25rem;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <select name="target_agent_id" required>
+                        <option value="">— pick agent —</option>
+                        {% for a in candidates %}
+                        <option value="{{ a.id }}">{{ a.name }}</option>
+                        {% endfor %}
+                    </select>
+                    <button type="submit" class="btn btn-sm">Copy</button>
+                </form>
+                {% else %}
+                <small>(already present in all agents)</small>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="empty-state">No skills have been synced yet. Open an agent and click "Sync from Workspace" on its Skills panel.</p>
+{% endif %}
+{% endblock %}

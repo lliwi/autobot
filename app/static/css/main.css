@@ -443,6 +443,20 @@ details[open] summary {
     color: var(--text-muted);
 }
 
+.chat-messages.hide-tool .chat-msg-tool {
+    display: none;
+}
+
+.chat-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-left: 1rem;
+    font-size: 13px;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
 .chat-msg-role {
     font-size: 11px;
     color: var(--text-muted);

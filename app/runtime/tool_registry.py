@@ -357,8 +357,18 @@ def _create_skill(_agent=None, _run_id=None, slug=None, title=None, summary=None
     from app.services.patch_service import propose_change
 
     skill_md = f"# {title}\n\n{summary}\n\n{instructions}\n"
+    manifest = {"name": slug, "description": summary, "version": "0.1.0"}
     outputs = []
     try:
+        manifest_patch = propose_change(
+            agent_id=_agent.id,
+            target_path=f"skills/{slug}/manifest.json",
+            new_content=json.dumps(manifest, indent=2) + "\n",
+            title=f"Create skill manifest '{slug}'",
+            reason=summary,
+            run_id=_run_id,
+        )
+        outputs.append({"file": f"skills/{slug}/manifest.json", "patch_id": manifest_patch.id, "status": manifest_patch.status})
         md_patch = propose_change(
             agent_id=_agent.id,
             target_path=f"skills/{slug}/SKILL.md",
@@ -380,7 +390,10 @@ def _create_skill(_agent=None, _run_id=None, slug=None, title=None, summary=None
             outputs.append({"file": f"skills/{slug}/skill.py", "patch_id": code_patch.id, "status": code_patch.status})
     except ValueError as e:
         return {"error": str(e), "created": outputs}
-    return {"slug": slug, "created": outputs, "message": "Skill scaffold written."}
+
+    from app.workspace.discovery import sync_skills_to_db
+    sync_skills_to_db(_agent)
+    return {"slug": slug, "created": outputs, "message": "Skill scaffold written and indexed."}
 
 
 def _create_tool(_agent=None, _run_id=None, slug=None, description=None,

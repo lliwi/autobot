@@ -1,5 +1,6 @@
 import json
 import re
+import shutil
 from pathlib import Path
 
 from app.extensions import db
@@ -109,3 +110,48 @@ def sync_agent_skills(agent_id):
     if agent is None:
         return []
     return sync_skills_to_db(agent)
+
+
+def share_skill(skill_id, target_agent_id):
+    """Copy a skill's filesystem directory from its source agent to a target agent
+    and create the corresponding Skill row. Returns the new Skill or raises ValueError.
+    """
+    source = db.session.get(Skill, skill_id)
+    if source is None:
+        raise ValueError("Skill not found")
+
+    source_agent = db.session.get(Agent, source.agent_id)
+    target_agent = db.session.get(Agent, target_agent_id)
+    if target_agent is None:
+        raise ValueError("Target agent not found")
+    if source_agent is None:
+        raise ValueError("Source agent not found")
+    if source_agent.id == target_agent.id:
+        raise ValueError("Source and target agents are the same")
+
+    existing = Skill.query.filter_by(agent_id=target_agent.id, slug=source.slug).first()
+    if existing is not None:
+        raise ValueError(f"Agent '{target_agent.name}' already has a skill with slug '{source.slug}'")
+
+    source_dir = get_workspace_path(source_agent) / source.path
+    target_dir = get_workspace_path(target_agent) / source.path
+    if not source_dir.exists():
+        raise ValueError(f"Source skill directory missing: {source_dir}")
+
+    target_dir.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(source_dir, target_dir)
+
+    copy = Skill(
+        agent_id=target_agent.id,
+        name=source.name,
+        slug=source.slug,
+        version=source.version,
+        description=source.description,
+        source=source.source,
+        enabled=True,
+        manifest_json=source.manifest_json,
+        path=source.path,
+    )
+    db.session.add(copy)
+    db.session.commit()
+    return copy
