@@ -243,6 +243,60 @@ def register_builtin_tools():
         )
     )
 
+    register(
+        ToolDefinition(
+            name="schedule_task",
+            description=(
+                "Create a recurring scheduled task for THIS agent. At each trigger the "
+                "scheduler will invoke the agent with the given message. Use this when "
+                "the user asks for a daily/weekly/periodic task (e.g. 'every day at 18:00')."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "schedule_expr": {
+                        "type": "string",
+                        "description": "Standard 5-field cron expression, e.g. '0 18 * * *' for every day at 18:00.",
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "The prompt the agent will receive when the task fires.",
+                    },
+                    "timezone": {
+                        "type": "string",
+                        "description": "IANA timezone (default 'UTC'). Note: cron fields are currently evaluated in UTC.",
+                    },
+                },
+                "required": ["schedule_expr", "message"],
+            },
+            handler=lambda **kwargs: _schedule_task(**kwargs),
+        )
+    )
+
+    register(
+        ToolDefinition(
+            name="list_scheduled_tasks",
+            description="List scheduled tasks owned by this agent.",
+            parameters={"type": "object", "properties": {}},
+            handler=lambda **kwargs: _list_scheduled_tasks(**kwargs),
+        )
+    )
+
+    register(
+        ToolDefinition(
+            name="cancel_scheduled_task",
+            description="Delete a scheduled task owned by this agent.",
+            parameters={
+                "type": "object",
+                "properties": {
+                    "task_id": {"type": "integer", "description": "ID of the ScheduledTask to delete."}
+                },
+                "required": ["task_id"],
+            },
+            handler=lambda **kwargs: _cancel_scheduled_task(**kwargs),
+        )
+    )
+
 
 def _read_workspace_file(_agent=None, filename=None, path=None, file=None, name=None, **kwargs):
     if _agent is None:
@@ -393,7 +447,17 @@ def _create_skill(_agent=None, _run_id=None, slug=None, title=None, summary=None
 
     from app.workspace.discovery import sync_skills_to_db
     sync_skills_to_db(_agent)
-    return {"slug": slug, "created": outputs, "message": "Skill scaffold written and indexed."}
+
+    from app.services.review_service import review_creation
+    review_payload = f"# {title}\n\n{summary}\n\n{instructions}"
+    if code:
+        review_payload += f"\n\n---\n# skill.py\n```python\n{code}\n```"
+    review = review_creation(_agent, "skill", slug, review_payload, run_id=_run_id)
+
+    result = {"slug": slug, "created": outputs, "message": "Skill scaffold written and indexed."}
+    if review is not None:
+        result["review"] = review
+    return result
 
 
 def _create_tool(_agent=None, _run_id=None, slug=None, description=None,
@@ -444,7 +508,20 @@ def _create_tool(_agent=None, _run_id=None, slug=None, description=None,
         outputs.append({"file": f"tools/{slug}/tool.py", "patch_id": code_patch.id, "status": code_patch.status})
     except ValueError as e:
         return {"error": str(e), "created": outputs}
-    return {"slug": slug, "created": outputs, "message": "Tool scaffold written."}
+
+    from app.services.review_service import review_creation
+    import json as _json
+    review_payload = (
+        f"# Tool '{slug}'\n\n{description}\n\n"
+        f"Parameters schema:\n```json\n{_json.dumps(parameters_schema, indent=2)}\n```\n\n"
+        f"Handler:\n```python\n{code}\n```"
+    )
+    review = review_creation(_agent, "tool", slug, review_payload, run_id=_run_id)
+
+    result = {"slug": slug, "created": outputs, "message": "Tool scaffold written."}
+    if review is not None:
+        result["review"] = review
+    return result
 
 
 _FETCH_MAX_BYTES = 200_000
@@ -476,6 +553,83 @@ def _fetch_url(_agent=None, url=None, method="GET", headers=None, **kwargs):
         "body": body,
         "truncated": truncated,
     }
+
+
+def _schedule_task(_agent=None, _run_id=None, schedule_expr=None, message=None, timezone=None, **kwargs):
+    if _agent is None:
+        return {"error": "No agent context"}
+    missing = [k for k, v in (("schedule_expr", schedule_expr), ("message", message)) if not v]
+    if missing:
+        return {"error": f"Missing required argument(s): {', '.join(missing)}"}
+    from croniter import croniter
+    if not croniter.is_valid(schedule_expr):
+        return {"error": f"Invalid cron expression: {schedule_expr!r}. Expected 5 fields, e.g. '0 18 * * *'."}
+    from app.services.scheduler_service import create_task
+
+    task = create_task(
+        agent_id=_agent.id,
+        task_type="cron",
+        schedule_expr=schedule_expr,
+        timezone_str=timezone or "UTC",
+        payload_json={"message": message},
+    )
+
+    from app.services.review_service import review_creation
+    review_payload = (
+        f"Cron: `{schedule_expr}` (tz={timezone or 'UTC'})\n"
+        f"Next run: {task.next_run_at.isoformat() if task.next_run_at else 'n/a'}\n\n"
+        f"Prompt that will fire:\n---\n{message}\n---"
+    )
+    review = review_creation(_agent, "scheduled_task", str(task.id), review_payload, run_id=_run_id)
+
+    result = {
+        "task_id": task.id,
+        "schedule_expr": task.schedule_expr,
+        "next_run_at": task.next_run_at.isoformat() if task.next_run_at else None,
+        "enabled": task.enabled,
+        "message": "Scheduled task created. The worker will pick it up within ~30s.",
+    }
+    if review is not None:
+        result["review"] = review
+    return result
+
+
+def _list_scheduled_tasks(_agent=None, **kwargs):
+    if _agent is None:
+        return {"error": "No agent context"}
+    from app.services.scheduler_service import list_tasks
+
+    tasks = list_tasks(agent_id=_agent.id)
+    return {
+        "tasks": [
+            {
+                "id": t.id,
+                "task_type": t.task_type,
+                "schedule_expr": t.schedule_expr,
+                "enabled": t.enabled,
+                "next_run_at": t.next_run_at.isoformat() if t.next_run_at else None,
+                "last_run_at": t.last_run_at.isoformat() if t.last_run_at else None,
+                "message": (t.payload_json or {}).get("message"),
+            }
+            for t in tasks
+        ]
+    }
+
+
+def _cancel_scheduled_task(_agent=None, task_id=None, **kwargs):
+    if _agent is None:
+        return {"error": "No agent context"}
+    if not task_id:
+        return {"error": "Missing required argument 'task_id'"}
+    from app.services.scheduler_service import delete_task, get_task
+
+    task = get_task(task_id)
+    if task is None:
+        return {"error": f"Task {task_id} not found"}
+    if task.agent_id != _agent.id:
+        return {"error": f"Task {task_id} does not belong to this agent"}
+    delete_task(task_id)
+    return {"task_id": task_id, "message": "Scheduled task deleted."}
 
 
 def _list_patches(_agent=None, status=None, **kwargs):

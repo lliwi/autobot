@@ -21,6 +21,8 @@ Built-in tool cheatsheet (always call with JSON objects like these):
 - `create_skill` — `{"slug": "weather-bcn", "title": "Weather Barcelona", "summary": "...", "instructions": "...markdown...", "code": "def handler(...): ..."}`. Preferred over two propose_change calls when creating a skill.
 - `create_tool` — `{"slug": "echo2", "description": "...", "parameters_schema": {"type":"object","properties":{...},"required":[...]}, "code": "def handler(_agent=None, **kwargs): return {...}"}`.
 - `delegate_task` — `{"target_name": "reviewer", "message": "review the patch #42"}`.
+- `schedule_task` — `{"schedule_expr": "0 18 * * *", "message": "...prompt to run..."}`. Use when the user asks for a recurring/daily/weekly task. 5-field cron, UTC.
+- `list_scheduled_tasks` / `cancel_scheduled_task` — manage this agent's scheduled tasks (`cancel_scheduled_task` needs `{"task_id": N}`).
 - `get_current_time` — no args. Returns ISO-8601 UTC.
 - `list_subagents` / `list_patches` — no required args.
 
@@ -29,6 +31,9 @@ Multi-step task template:
 2. Gather any information you need (one tool call at a time).
 3. Produce the artefact(s) with `propose_change`.
 4. Summarise what you did for the user.
+
+Auto-review:
+- When a reviewer sub-agent exists, `create_skill`, `create_tool` and `schedule_task` automatically delegate an audit to it. Their response contains a `review` field with the reviewer's feedback. If the review flags something concrete, mention it to the user or fix it in a follow-up step.
 """
 
 
