@@ -42,7 +42,8 @@
       "Bash(curl -fsSL \"https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/openai_model_info.rs\")",
       "Bash(curl -fsSL \"https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/lib.rs\")",
       "mcp__chrome-devtools__list_pages",
-      "mcp__chrome-devtools__wait_for"
+      "mcp__chrome-devtools__wait_for",
+      "mcp__chrome-devtools__evaluate_script"
     ],
     "additionalDirectories": [
       "/tmp"
