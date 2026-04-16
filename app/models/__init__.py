@@ -10,3 +10,4 @@ from app.models.tool import Tool  # noqa: F401
 from app.models.patch_proposal import PatchProposal  # noqa: F401
 from app.models.objective import Objective  # noqa: F401
 from app.models.heartbeat_event import HeartbeatEvent  # noqa: F401
+from app.models.approval_rule import ApprovalRule  # noqa: F401

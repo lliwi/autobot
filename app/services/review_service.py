@@ -26,6 +26,30 @@ _REVIEW_INSTRUCTIONS = (
     "looks fine, say 'LGTM' and explain in one sentence why."
 )
 
+_PATCH_REVIEW_INSTRUCTIONS = (
+    "You are the reviewer gatekeeping a patch to an existing workspace file. "
+    "Your FIRST line must be exactly `APPROVE` or `REJECT` (one word, uppercase). "
+    "Then 1-5 short bullet points explaining why. Approve only if the patch is "
+    "safe, coherent, and does not introduce obvious bugs, security risks, or "
+    "regressions. Reject on any real concern. Do NOT call tools."
+)
+
+_APPROVE_RE = None
+_REJECT_RE = None
+
+
+def _compile_verdict_regex():
+    import re
+    global _APPROVE_RE, _REJECT_RE
+    if _APPROVE_RE is None:
+        _APPROVE_RE = re.compile(r"^\s*APPROVE\b", re.IGNORECASE)
+        _REJECT_RE = re.compile(r"^\s*REJECT\b", re.IGNORECASE)
+    return _APPROVE_RE, _REJECT_RE
+
+
+def is_auto_approve_l2_enabled() -> bool:
+    return os.environ.get("AUTOBOT_AUTO_APPROVE_L2", "1") not in ("0", "false", "False", "")
+
 
 def is_enabled() -> bool:
     return os.environ.get("AUTOBOT_AUTO_REVIEW", "1") not in ("0", "false", "False", "")
@@ -125,6 +149,76 @@ def review_creation(agent: Agent, artefact_type: str, artefact_id: str,
     return {
         "reviewer": reviewer.slug,
         "summary": (result.get("response") or "").strip() or None,
+        "error": result.get("error"),
+        "run_id": child_run_id,
+    }
+
+
+def review_patch(agent: Agent, target_path: str, diff_text: str,
+                 new_content: str, reason: str,
+                 run_id: int | None = None) -> dict | None:
+    """Ask a reviewer agent to vote on a pending level-2 patch.
+
+    Returns ``None`` if no reviewer is available, auto-review is disabled, or
+    the agent itself is the reviewer. Returns a dict
+    ``{approve, summary, error, run_id, reviewer}`` otherwise. ``approve`` is
+    True only when the reviewer emitted an explicit ``APPROVE`` verdict.
+    """
+    if not is_enabled() or not is_auto_approve_l2_enabled():
+        return None
+    reviewer = find_reviewer(agent)
+    if reviewer is None:
+        return None
+    if "review" in f"{agent.slug} {agent.name}".lower():
+        return None
+
+    diff_trimmed = diff_text if len(diff_text) <= _REVIEW_BUDGET_CHARS else (
+        diff_text[:_REVIEW_BUDGET_CHARS] + f"\n\n[...diff truncated, full length={len(diff_text)} chars]"
+    )
+    content_preview = new_content if len(new_content) <= _REVIEW_BUDGET_CHARS else (
+        new_content[:_REVIEW_BUDGET_CHARS] + f"\n\n[...file truncated, full length={len(new_content)} chars]"
+    )
+    message = (
+        f"[PATCH-REVIEW] {target_path}\n"
+        f"Proposed by agent: {agent.slug}\n"
+        f"Stated reason: {reason}\n\n"
+        f"{_PATCH_REVIEW_INSTRUCTIONS}\n\n"
+        f"Unified diff:\n```diff\n{diff_trimmed}\n```\n\n"
+        f"Full proposed file:\n```\n{content_preview}\n```"
+    )
+
+    from app.extensions import db
+    from app.models.run import Run
+    from app.services.chat_service import run_agent_non_streaming
+
+    try:
+        result = run_agent_non_streaming(
+            agent_id=reviewer.id,
+            message=message,
+            channel_type="internal",
+            trigger_type="patch_review",
+        )
+    except Exception as e:
+        logger.exception("Patch review failed for %s", target_path)
+        return {"reviewer": reviewer.slug, "approve": False,
+                "summary": None, "error": str(e), "run_id": None}
+
+    child_run_id = result.get("run_id")
+    if run_id and child_run_id:
+        child_run = db.session.get(Run, child_run_id)
+        if child_run is not None:
+            child_run.parent_run_id = run_id
+            db.session.commit()
+
+    summary = (result.get("response") or "").strip()
+    first_line = summary.splitlines()[0] if summary else ""
+    approve_re, reject_re = _compile_verdict_regex()
+    approve = bool(approve_re.match(first_line)) and not reject_re.match(first_line)
+
+    return {
+        "reviewer": reviewer.slug,
+        "approve": approve,
+        "summary": summary or None,
         "error": result.get("error"),
         "run_id": child_run_id,
     }

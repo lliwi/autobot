@@ -1,0 +1,72 @@
+{% extends "base.html" %}
+
+{% block title %}Approval Rules - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Approval Rules</h1>
+</div>
+
+<p class="empty-state" style="text-align: left; padding: 0 0 16px 0;">
+    Level-2 patches matching any of these rules are auto-applied without manual review.
+    Pattern is either an exact path or a prefix (ending with <code>*</code>).
+</p>
+
+<div class="form-card" style="margin-bottom: 24px; max-width: 720px;">
+    <form method="POST" action="{{ url_for('dashboard.approval_rule_create') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group">
+            <label>Agent (leave blank for "any agent")</label>
+            <select name="agent_id">
+                <option value="">— any agent —</option>
+                {% for a in agents %}
+                <option value="{{ a.id }}">{{ a.name }} ({{ a.slug }})</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="form-group">
+            <label>Pattern</label>
+            <input type="text" name="pattern" placeholder="skills/weather-barcelona/skill.py or skills/weather-barcelona/*" required>
+        </div>
+        <div class="form-group">
+            <label>Note (optional)</label>
+            <input type="text" name="note" placeholder="Why this rule exists">
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Add rule</button>
+        </div>
+    </form>
+</div>
+
+{% if rules %}
+<table class="table">
+    <thead>
+        <tr>
+            <th>Agent</th>
+            <th>Pattern</th>
+            <th>Note</th>
+            <th>Created</th>
+            <th></th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for r in rules %}
+        <tr>
+            <td>{% if r.agent %}{{ r.agent.name }}{% else %}<em>any</em>{% endif %}</td>
+            <td><code>{{ r.pattern }}</code></td>
+            <td>{{ r.note or '—' }}</td>
+            <td>{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '-' }}</td>
+            <td>
+                <form method="POST" action="{{ url_for('dashboard.approval_rule_delete', rule_id=r.id) }}" style="display:inline;" onsubmit="return confirm('Delete this rule?');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                </form>
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="empty-state">No approval rules yet. Approve a pending patch and tick "Always auto-apply…" to create one.</p>
+{% endif %}
+{% endblock %}

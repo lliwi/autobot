@@ -75,9 +75,28 @@
 
 <div class="section" style="margin-top: 1rem;">
     {% if patch.status == 'pending_review' %}
-    <form method="POST" action="{{ url_for('dashboard.patch_approve', patch_id=patch.id) }}" style="display:inline;">
+    <form method="POST" action="{{ url_for('dashboard.patch_approve', patch_id=patch.id) }}" class="form-card" style="max-width: 640px;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <button type="submit" class="btn btn-primary">Approve</button>
+        <input type="hidden" name="apply" value="1">
+        <div class="form-group">
+            <label>
+                <input type="checkbox" name="remember" value="1" id="remember-chk" onchange="document.getElementById('rule-fields').style.display = this.checked ? 'block' : 'none';">
+                Always auto-apply future patches matching this pattern (for this agent)
+            </label>
+        </div>
+        <div id="rule-fields" style="display:none;">
+            <div class="form-group">
+                <label>Pattern (exact path or ends with <code>*</code> for prefix)</label>
+                <input type="text" name="rule_pattern" value="{{ patch.target_path }}">
+            </div>
+            <div class="form-group">
+                <label>Note (optional)</label>
+                <input type="text" name="rule_note" placeholder="Why you trust this agent for this path">
+            </div>
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Approve &amp; Apply</button>
+        </div>
     </form>
     <form method="POST" action="{{ url_for('dashboard.patch_reject', patch_id=patch.id) }}" style="display:inline;">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

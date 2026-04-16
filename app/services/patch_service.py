@@ -104,9 +104,32 @@ def propose_change(agent_id, target_path, new_content, title, reason, run_id=Non
     db.session.add(patch)
     db.session.commit()
 
-    # Auto-apply level 1 changes
+    # Auto-apply level 1 changes.
     if status == "approved":
         _apply_patch(patch, agent, new_content)
+        return patch
+
+    # Level 2: honour standing approval rules the user has set for this
+    # agent + target. If a rule matches, auto-apply; otherwise stay pending.
+    if level == 2:
+        from app.services.approval_rule_service import matches_rule
+
+        rule = matches_rule(agent_id, target_path)
+        if rule is not None:
+            patch.status = "approved"
+            patch.test_result_json = {
+                "auto_approved_by_rule": {
+                    "rule_id": rule.id,
+                    "pattern": rule.pattern,
+                    "note": rule.note,
+                }
+            }
+            db.session.commit()
+            _apply_patch(patch, agent, new_content)
+            logger.info(
+                "Patch %s auto-approved by standing rule %s: %s",
+                patch.id, rule.id, target_path,
+            )
 
     return patch
 
