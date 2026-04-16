@@ -40,7 +40,9 @@
       "Bash(curl -fsSL \"https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/config.schema.json\")",
       "Bash(python3 -c \"import json,sys; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('properties',{}\\).get\\('model',{}\\), indent=2\\)\\); print\\('---'\\); print\\(json.dumps\\(d.get\\('properties',{}\\).get\\('default_model',{}\\), indent=2\\)\\)\")",
       "Bash(curl -fsSL \"https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/openai_model_info.rs\")",
-      "Bash(curl -fsSL \"https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/lib.rs\")"
+      "Bash(curl -fsSL \"https://raw.githubusercontent.com/openai/codex/main/codex-rs/core/src/lib.rs\")",
+      "mcp__chrome-devtools__list_pages",
+      "mcp__chrome-devtools__wait_for"
     ],
     "additionalDirectories": [
       "/tmp"

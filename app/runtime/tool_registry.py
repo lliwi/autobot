@@ -1,3 +1,5 @@
+import json
+import re
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
@@ -141,6 +143,91 @@ def register_builtin_tools():
 
     register(
         ToolDefinition(
+            name="create_skill",
+            description=(
+                "Create a new skill in the agent workspace in one call. Writes "
+                "`skills/<slug>/SKILL.md` and (optionally) `skills/<slug>/skill.py`. "
+                "Prefer this over chaining multiple propose_change calls."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "slug": {
+                        "type": "string",
+                        "description": "Short kebab-case identifier, e.g. 'weather-barcelona'.",
+                    },
+                    "title": {"type": "string", "description": "Human-readable title."},
+                    "summary": {
+                        "type": "string",
+                        "description": "One or two sentences explaining what the skill does and when to use it.",
+                    },
+                    "instructions": {
+                        "type": "string",
+                        "description": "Markdown body with steps, inputs, outputs, examples.",
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": "Optional Python implementation. If provided, saved as skill.py.",
+                    },
+                },
+                "required": ["slug", "title", "summary", "instructions"],
+            },
+            handler=lambda **kwargs: _create_skill(**kwargs),
+        )
+    )
+
+    register(
+        ToolDefinition(
+            name="create_tool",
+            description=(
+                "Create a new workspace tool (manifest.json + tool.py) in one call under "
+                "`tools/<slug>/`. Prefer this over chaining propose_change for new tools."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string", "description": "Short kebab-case identifier."},
+                    "description": {"type": "string", "description": "Human-readable description of what the tool does."},
+                    "parameters_schema": {
+                        "type": "object",
+                        "description": "JSON Schema object describing the tool parameters (type, properties, required).",
+                    },
+                    "code": {
+                        "type": "string",
+                        "description": "Python source implementing `def handler(_agent=None, **kwargs): ...` returning a dict.",
+                    },
+                },
+                "required": ["slug", "description", "parameters_schema", "code"],
+            },
+            handler=lambda **kwargs: _create_tool(**kwargs),
+        )
+    )
+
+    register(
+        ToolDefinition(
+            name="fetch_url",
+            description=(
+                "Fetch the contents of an HTTP(S) URL. Returns up to 200 KB of text. "
+                "Use to read web pages, JSON APIs, or RSS feeds when building or running a skill."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "url": {"type": "string", "description": "Absolute URL to fetch (http or https)."},
+                    "method": {"type": "string", "description": "HTTP method (default GET)."},
+                    "headers": {
+                        "type": "object",
+                        "description": "Optional HTTP headers as a flat string-to-string map.",
+                    },
+                },
+                "required": ["url"],
+            },
+            handler=lambda **kwargs: _fetch_url(**kwargs),
+        )
+    )
+
+    register(
+        ToolDefinition(
             name="list_patches",
             description="List recent patch proposals for this agent, optionally filtered by status.",
             parameters={
@@ -250,6 +337,132 @@ def _propose_change(_agent=None, _run_id=None, target_path=None, new_content=Non
         }
     except ValueError as e:
         return {"error": str(e)}
+
+
+_SKILL_SLUG_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,50}$")
+
+
+def _create_skill(_agent=None, _run_id=None, slug=None, title=None, summary=None,
+                  instructions=None, code=None, **kwargs):
+    if _agent is None:
+        return {"error": "No agent context"}
+    missing = [k for k, v in (
+        ("slug", slug), ("title", title), ("summary", summary), ("instructions", instructions),
+    ) if not v]
+    if missing:
+        return {"error": f"Missing required argument(s): {', '.join(missing)}"}
+    if not _SKILL_SLUG_RE.match(slug):
+        return {"error": "slug must be lowercase kebab-case (letters, digits, '-')."}
+
+    from app.services.patch_service import propose_change
+
+    skill_md = f"# {title}\n\n{summary}\n\n{instructions}\n"
+    outputs = []
+    try:
+        md_patch = propose_change(
+            agent_id=_agent.id,
+            target_path=f"skills/{slug}/SKILL.md",
+            new_content=skill_md,
+            title=f"Create skill '{slug}'",
+            reason=summary,
+            run_id=_run_id,
+        )
+        outputs.append({"file": f"skills/{slug}/SKILL.md", "patch_id": md_patch.id, "status": md_patch.status})
+        if code:
+            code_patch = propose_change(
+                agent_id=_agent.id,
+                target_path=f"skills/{slug}/skill.py",
+                new_content=code,
+                title=f"Create skill code for '{slug}'",
+                reason=summary,
+                run_id=_run_id,
+            )
+            outputs.append({"file": f"skills/{slug}/skill.py", "patch_id": code_patch.id, "status": code_patch.status})
+    except ValueError as e:
+        return {"error": str(e), "created": outputs}
+    return {"slug": slug, "created": outputs, "message": "Skill scaffold written."}
+
+
+def _create_tool(_agent=None, _run_id=None, slug=None, description=None,
+                 parameters_schema=None, code=None, **kwargs):
+    if _agent is None:
+        return {"error": "No agent context"}
+    missing = [k for k, v in (
+        ("slug", slug), ("description", description),
+        ("parameters_schema", parameters_schema), ("code", code),
+    ) if not v]
+    if missing:
+        return {"error": f"Missing required argument(s): {', '.join(missing)}"}
+    if not _SKILL_SLUG_RE.match(slug):
+        return {"error": "slug must be lowercase kebab-case."}
+    if not isinstance(parameters_schema, dict):
+        return {"error": "parameters_schema must be a JSON object."}
+    if "def handler" not in code:
+        return {"error": "code must define a `handler` function."}
+
+    from app.services.patch_service import propose_change
+
+    manifest = {
+        "name": slug,
+        "description": description,
+        "version": "0.1.0",
+        "parameters": parameters_schema,
+    }
+
+    outputs = []
+    try:
+        man_patch = propose_change(
+            agent_id=_agent.id,
+            target_path=f"tools/{slug}/manifest.json",
+            new_content=json.dumps(manifest, indent=2) + "\n",
+            title=f"Create tool '{slug}'",
+            reason=description,
+            run_id=_run_id,
+        )
+        outputs.append({"file": f"tools/{slug}/manifest.json", "patch_id": man_patch.id, "status": man_patch.status})
+        code_patch = propose_change(
+            agent_id=_agent.id,
+            target_path=f"tools/{slug}/tool.py",
+            new_content=code if code.endswith("\n") else code + "\n",
+            title=f"Create tool code for '{slug}'",
+            reason=description,
+            run_id=_run_id,
+        )
+        outputs.append({"file": f"tools/{slug}/tool.py", "patch_id": code_patch.id, "status": code_patch.status})
+    except ValueError as e:
+        return {"error": str(e), "created": outputs}
+    return {"slug": slug, "created": outputs, "message": "Tool scaffold written."}
+
+
+_FETCH_MAX_BYTES = 200_000
+
+
+def _fetch_url(_agent=None, url=None, method="GET", headers=None, **kwargs):
+    if not url:
+        return {"error": "Missing required argument 'url'"}
+    if not (url.startswith("http://") or url.startswith("https://")):
+        return {"error": "URL must start with http:// or https://"}
+    import httpx
+
+    try:
+        with httpx.Client(follow_redirects=True, timeout=20.0) as client:
+            resp = client.request(method.upper(), url, headers=headers or None)
+    except httpx.HTTPError as e:
+        return {"error": f"Request failed: {e}"}
+
+    body = resp.text
+    truncated = False
+    if len(body.encode("utf-8", errors="replace")) > _FETCH_MAX_BYTES:
+        body = body[:_FETCH_MAX_BYTES]
+        truncated = True
+
+    return {
+        "url": str(resp.url),
+        "status": resp.status_code,
+        "content_type": resp.headers.get("content-type"),
+        "body": body,
+        "truncated": truncated,
+    }
 
 
 def _list_patches(_agent=None, status=None, **kwargs):

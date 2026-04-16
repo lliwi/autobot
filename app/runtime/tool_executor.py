@@ -54,7 +54,6 @@ def execute(run_id, agent, tool_name, arguments):
     db.session.commit()
 
     try:
-        current_app.logger.info(f"Tool call: {tool_name} args={arguments}")
         # Inject agent context and run_id for built-in tools
         result = tool_def.handler(_agent=agent, _run_id=run_id, **arguments)
         execution.output_json = result

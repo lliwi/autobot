@@ -71,6 +71,7 @@ def run(agent, session, user_message, run_id):
             ],
         })
 
+        abort_after_round = False
         for tc in tool_calls:
             tool_name = tc["function"]["name"]
             try:
@@ -84,12 +85,17 @@ def run(agent, session, user_message, run_id):
             yield json.dumps({"type": "tool_call", "data": {"name": tool_name, "arguments": arguments}})
 
             if repeat_signatures[signature] >= 3:
-                result = {
-                    "error": f"Repeated identical call to '{tool_name}' with the same arguments detected. Stop calling this tool with these arguments — inspect the previous tool result and try a different approach or answer the user directly.",
-                    "previous_call_count": repeat_signatures[signature],
-                }
-            else:
-                result = execute_tool(run_id, agent, tool_name, arguments)
+                abort_after_round = True
+                yield json.dumps({
+                    "type": "error",
+                    "data": (
+                        f"Aborted: tool '{tool_name}' was called 3 times with the same arguments "
+                        f"({arguments}) without progress."
+                    ),
+                })
+                return
+
+            result = execute_tool(run_id, agent, tool_name, arguments)
 
             yield json.dumps({"type": "tool_result", "data": {"tool": tool_name, "result": result}})
 
@@ -99,6 +105,9 @@ def run(agent, session, user_message, run_id):
                 "tool_call_id": tc["id"],
                 "content": json.dumps(result),
             })
+
+        if abort_after_round:
+            return
 
     # Hit max rounds
     yield json.dumps({"type": "error", "data": "Maximum tool call rounds reached"})

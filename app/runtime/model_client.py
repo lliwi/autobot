@@ -43,7 +43,7 @@ def stream_chat_completion(agent, messages, tools=None):
         "include": ["reasoning.encrypted_content"],
         "prompt_cache_key": _cache_key(messages),
         "tool_choice": "auto",
-        "parallel_tool_calls": True,
+        "parallel_tool_calls": False,
     }
     if tools:
         body["tools"] = _convert_tools(tools)
@@ -80,6 +80,15 @@ def _consume_sse(response):
                         "name": item.get("name"),
                         "arguments": item.get("arguments") or "",
                     }
+        elif et == "response.output_item.done":
+            # Safety net: if the .done event carries fully-materialized args and
+            # we didn't receive deltas, use them.
+            item = event.get("item") or {}
+            if item.get("type") == "function_call":
+                call_id = item.get("call_id")
+                final_args = item.get("arguments")
+                if call_id and call_id in tool_call_buffers and final_args:
+                    tool_call_buffers[call_id]["arguments"] = final_args
         elif et == "response.output_text.delta":
             delta = event.get("delta") or ""
             if delta:
