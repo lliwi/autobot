@@ -2,6 +2,7 @@ from flask import jsonify, request
 
 from app.api import api_bp
 from app.api.middleware import auth_required
+from app.services.codex_quota_service import get_latest_snapshot
 from app.services.metrics_service import (
     error_counts,
     response_times,
@@ -52,3 +53,12 @@ def metrics_usage_by_channel():
 def metrics_usage_by_tool():
     days = request.args.get("days", 30, type=int)
     return jsonify(usage_by_tool(days))
+
+
+@api_bp.route("/metrics/codex-quota")
+@auth_required
+def metrics_codex_quota():
+    snapshot = get_latest_snapshot()
+    if snapshot is None:
+        return jsonify({"available": False})
+    return jsonify({"available": True, **snapshot})

@@ -12,3 +12,4 @@ from app.models.objective import Objective  # noqa: F401
 from app.models.heartbeat_event import HeartbeatEvent  # noqa: F401
 from app.models.approval_rule import ApprovalRule  # noqa: F401
 from app.models.credential import Credential  # noqa: F401
+from app.models.codex_quota_snapshot import CodexQuotaSnapshot  # noqa: F401

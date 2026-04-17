@@ -14,6 +14,14 @@
     </div>
 </div>
 
+<div class="card codex-quota-card" id="codex-quota-card">
+    <div class="codex-quota-header">
+        <h3>Codex subscription consumption</h3>
+        <small id="codex-quota-meta">Loading…</small>
+    </div>
+    <div class="codex-quota-bars" id="codex-quota-bars"></div>
+</div>
+
 <div class="metrics-grid">
     <div class="card">
         <h3>Runs per Day</h3>
@@ -100,8 +108,87 @@ function loadCharts(days) {
     });
 }
 
+function formatWindow(minutes) {
+    if (!minutes) return '';
+    if (minutes >= 1440 && minutes % 1440 === 0) {
+        const d = minutes / 1440;
+        return d === 1 ? '1-day window' : `${d}-day window`;
+    }
+    if (minutes >= 60 && minutes % 60 === 0) {
+        const h = minutes / 60;
+        return h === 1 ? '1-hour window' : `${h}-hour window`;
+    }
+    return `${minutes}-min window`;
+}
+
+function formatReset(iso) {
+    if (!iso) return '';
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return '';
+    const diffMs = d.getTime() - Date.now();
+    if (diffMs <= 0) return 'resets soon';
+    const mins = Math.round(diffMs / 60000);
+    if (mins < 60) return `resets in ${mins}m`;
+    const hours = Math.floor(mins / 60);
+    const rest = mins % 60;
+    if (hours < 48) return `resets in ${hours}h ${rest}m`;
+    const days = Math.floor(hours / 24);
+    return `resets in ${days}d ${hours % 24}h`;
+}
+
+function barColor(used) {
+    if (used >= 90) return '#ef4444';
+    if (used >= 70) return '#f59e0b';
+    return '#10b981';
+}
+
+function renderQuotaBar(window, data) {
+    if (data == null || data.used == null) {
+        return `<div class="quota-row quota-empty"><span class="quota-label">${window}</span><span>no data yet</span></div>`;
+    }
+    const used = data.used;
+    const remaining = data.remaining;
+    const color = barColor(used);
+    const windowLabel = formatWindow(data.window_minutes);
+    const reset = formatReset(data.resets_at);
+    return `
+        <div class="quota-row">
+            <div class="quota-row-head">
+                <span class="quota-label">${window}${windowLabel ? ` · ${windowLabel}` : ''}</span>
+                <span class="quota-remaining"><strong>${remaining.toFixed(1)}%</strong> remaining</span>
+            </div>
+            <div class="quota-bar">
+                <div class="quota-bar-fill" style="width: ${used}%; background: ${color};"></div>
+            </div>
+            <div class="quota-row-foot">
+                <span>${used.toFixed(1)}% used</span>
+                <span>${reset}</span>
+            </div>
+        </div>
+    `;
+}
+
+function loadCodexQuota() {
+    fetchJson('/api/metrics/codex-quota').then(d => {
+        const meta = document.getElementById('codex-quota-meta');
+        const bars = document.getElementById('codex-quota-bars');
+        if (!d.available) {
+            meta.textContent = 'No quota snapshot yet — send a message to any agent to populate this.';
+            bars.innerHTML = '';
+            return;
+        }
+        const plan = d.plan_type ? `plan: <code>${d.plan_type}</code>` : '';
+        const fetched = d.fetched_at ? `updated ${new Date(d.fetched_at).toLocaleString()}` : '';
+        meta.innerHTML = [plan, fetched].filter(Boolean).join(' · ');
+        bars.innerHTML = renderQuotaBar('Short window', d.primary) + renderQuotaBar('Weekly window', d.secondary);
+    }).catch(() => {
+        document.getElementById('codex-quota-meta').textContent = 'Failed to load.';
+    });
+}
+
 document.getElementById('days-select').addEventListener('change', e => loadCharts(e.target.value));
 loadCharts(30);
+loadCodexQuota();
 </script>
 
 <style>
@@ -121,6 +208,58 @@ loadCharts(30);
     margin: 0 0 0.75rem;
     font-size: 0.95rem;
     color: var(--text-secondary, #6b7280);
+}
+.codex-quota-card {
+    background: transparent;
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin-top: 1rem;
+}
+.codex-quota-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+.codex-quota-header h3 {
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--text-secondary, #6b7280);
+}
+.codex-quota-bars {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 1.25rem;
+}
+.quota-row-head, .quota-row-foot {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85rem;
+}
+.quota-row-head { margin-bottom: 0.35rem; }
+.quota-row-foot {
+    margin-top: 0.35rem;
+    color: var(--text-secondary, #6b7280);
+}
+.quota-remaining strong {
+    font-size: 1rem;
+}
+.quota-bar {
+    height: 10px;
+    background: rgba(107, 114, 128, 0.2);
+    border-radius: 6px;
+    overflow: hidden;
+}
+.quota-bar-fill {
+    height: 100%;
+    border-radius: 6px;
+    transition: width 0.4s ease;
+}
+.quota-empty {
+    color: var(--text-secondary, #6b7280);
+    font-size: 0.85rem;
 }
 </style>
 {% endblock %}

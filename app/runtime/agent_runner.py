@@ -43,6 +43,13 @@ def run(agent, session, user_message, run_id):
                     usage_total["input_tokens"] += delta_data.get("input_tokens", 0)
                     usage_total["output_tokens"] += delta_data.get("output_tokens", 0)
 
+                elif delta_type == "rate_limits":
+                    try:
+                        from app.services.codex_quota_service import save_snapshot
+                        save_snapshot(delta_data)
+                    except Exception as e:
+                        current_app.logger.debug("Skipped codex quota snapshot: %s", e)
+
         except Exception as e:
             current_app.logger.error(f"Model call error: {e}")
             yield json.dumps({"type": "error", "data": str(e)})

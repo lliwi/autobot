@@ -61,6 +61,14 @@ def stream_chat_completion(agent, messages, tools=None):
         if response.status_code != 200:
             error_body = response.read().decode("utf-8", errors="replace")[:500]
             raise RuntimeError(f"Codex API {response.status_code}: {error_body}")
+        # Forward the subscription rate-limit headers so the runner can persist
+        # a snapshot for the metrics dashboard.
+        quota_headers = {
+            k: v for k, v in response.headers.items()
+            if isinstance(k, str) and k.lower().startswith("x-codex-")
+        }
+        if quota_headers:
+            yield ("rate_limits", quota_headers)
         yield from _consume_sse(response)
 
 
