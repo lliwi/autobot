@@ -45,7 +45,8 @@
       "mcp__chrome-devtools__wait_for",
       "mcp__chrome-devtools__evaluate_script",
       "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" \"http://localhost:5000/metrics\")",
-      "Bash(curl -s -o /dev/null -w \"API HTTP %{http_code}\\\\n\" \"http://localhost:5000/api/metrics/codex-quota\")"
+      "Bash(curl -s -o /dev/null -w \"API HTTP %{http_code}\\\\n\" \"http://localhost:5000/api/metrics/codex-quota\")",
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5000/profile)"
     ],
     "additionalDirectories": [
       "/tmp"

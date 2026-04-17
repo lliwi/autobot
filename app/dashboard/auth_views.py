@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 
 from flask import flash, redirect, render_template, request, url_for
-from flask_login import current_user, login_user, logout_user
+from flask_login import current_user, login_required, login_user, logout_user
 
 from app.dashboard import dashboard_bp
 from app.extensions import db
@@ -34,3 +34,29 @@ def login():
 def logout():
     logout_user()
     return redirect(url_for("dashboard.login"))
+
+
+@dashboard_bp.route("/profile", methods=["GET", "POST"])
+@login_required
+def profile():
+    if request.method == "POST":
+        raw = (request.form.get("matrix_id") or "").strip()
+        matrix_id = raw or None
+        if matrix_id and not (matrix_id.startswith("@") and ":" in matrix_id):
+            flash("Matrix ID must look like '@user:homeserver'.", "danger")
+            return redirect(url_for("dashboard.profile"))
+
+        if matrix_id:
+            existing = User.query.filter(
+                User.matrix_id == matrix_id, User.id != current_user.id
+            ).first()
+            if existing is not None:
+                flash(f"Matrix ID '{matrix_id}' is already linked to another account.", "danger")
+                return redirect(url_for("dashboard.profile"))
+
+        current_user.matrix_id = matrix_id
+        db.session.commit()
+        flash("Profile updated.", "success")
+        return redirect(url_for("dashboard.profile"))
+
+    return render_template("dashboard/profile.html")

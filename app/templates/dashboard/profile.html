@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+
+{% block title %}Profile - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Profile</h1>
+    <small>Account settings for {{ current_user.email }}.</small>
+</div>
+
+<div class="form-card" style="max-width: 640px;">
+    <h3>Matrix link</h3>
+    <p class="empty-state" style="text-align: left; padding: 0 0 12px 0;">
+        Link your Matrix ID so you can run approval commands (<code>/pending</code>,
+        <code>/approve patch &lt;id&gt;</code>, etc.) from your Matrix client.
+        Format: <code>@user:homeserver.tld</code>.
+    </p>
+    <form method="POST">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <div class="form-group">
+            <label>Matrix ID</label>
+            <input type="text" name="matrix_id"
+                   value="{{ current_user.matrix_id or '' }}"
+                   placeholder="@alice:matrix.org">
+            <small>Leave empty to unlink.</small>
+        </div>
+        <div class="form-actions">
+            <button type="submit" class="btn btn-primary">Save</button>
+        </div>
+    </form>
+</div>
+{% endblock %}

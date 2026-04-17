@@ -30,6 +30,7 @@
             </ul>
             <div class="sidebar-footer">
                 <span>{{ current_user.email }}</span>
+                <a href="{{ url_for('dashboard.profile') }}">Profile</a>
                 <a href="{{ url_for('dashboard.logout') }}">Logout</a>
             </div>
         </nav>

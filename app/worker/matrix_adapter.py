@@ -158,6 +158,24 @@ class MatrixBot:
             elif not is_user_allowed(event.sender):
                 return
 
+            # Slash commands (approve/reject/pending) bypass the agent runtime.
+            from app.services import matrix_command_service
+
+            if matrix_command_service.is_command(event.body):
+                reply = matrix_command_service.handle_command(
+                    sender=event.sender, body=event.body, is_dm=is_dm,
+                )
+                if reply:
+                    try:
+                        await client.room_send(
+                            room_id=room.room_id,
+                            message_type="m.room.message",
+                            content={"msgtype": "m.text", "body": reply},
+                        )
+                    except Exception as e:
+                        logger.error(f"Failed to send Matrix command reply: {e}")
+                return
+
             # Get agent for this room
             agent = get_agent_for_room(room.room_id)
             if agent is None:
