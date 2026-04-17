@@ -4,6 +4,7 @@ from app.models.message import Message
 from app.workspace.loader import (
     load_agents,
     load_memory,
+    load_packages,
     load_security_baseline,
     load_soul,
     load_tools,
@@ -35,6 +36,8 @@ Built-in tool cheatsheet (always call with JSON objects like these):
 - `delete_credential` — `{"name": "..."}`. Removes an agent-scoped credential.
 - `get_current_time` — no args. Returns ISO-8601 UTC.
 - `list_subagents` / `list_patches` — no required args.
+- `install_package` — `{"spec": "feedparser"}` or `{"spec": "pandas>=2,<3"}`. Installs into this agent's isolated workspace venv. Specs on the platform allowlist install immediately; everything else returns `status: "pending_review"` and waits for admin approval. Never pass git URLs, paths, or pip flags.
+- `list_packages` — no args. Returns this agent's install history with statuses (`installed`, `pending_review`, `failed`, `rejected`). Check here before requesting an install so you don't duplicate a pending row.
 
 Multi-step task template:
 1. State the plan in one line.
@@ -57,6 +60,7 @@ def build_context(agent, session, user_message):
     tools_doc = load_tools(agent)
     agents_doc = load_agents(agent)
     memory = load_memory(agent)
+    packages = load_packages(agent)
 
     # Security baseline goes first so downstream instructions can't override it
     # by sheer prompt-order. TOOL_PROTOCOL follows with the operational rules.
@@ -72,6 +76,8 @@ def build_context(agent, session, user_message):
         system_parts.append(f"## Agent Network\n{agents_doc}")
     if memory:
         system_parts.append(f"## Memory\n{memory}")
+    if packages:
+        system_parts.append(f"## Workspace Packages\n{packages}")
 
     # Inject enabled skill descriptions into system prompt
     from app.workspace.discovery import get_enabled_skills

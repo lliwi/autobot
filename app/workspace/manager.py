@@ -14,7 +14,12 @@ def _template_path():
 
 
 def scaffold_workspace(slug):
-    """Create a new workspace directory from the template."""
+    """Create a new workspace directory from the template.
+
+    Also seeds a ``PACKAGES.md`` placeholder. The per-workspace venv itself is
+    created lazily by ``venv_manager.ensure_venv`` on first tool run so the
+    scaffold stays fast even if pip is slow/offline.
+    """
     workspace = _base_path() / slug
     workspace.mkdir(parents=True, exist_ok=True)
 
@@ -30,6 +35,15 @@ def scaffold_workspace(slug):
     # Create standard subdirectories (no-op if already copied from template)
     for subdir in ("skills", "tools", "agents", "runs", "patches", "tests"):
         (workspace / subdir).mkdir(exist_ok=True)
+
+    # Placeholder so the context builder always sees a PACKAGES.md.
+    packages_md = workspace / "PACKAGES.md"
+    if not packages_md.exists():
+        packages_md.write_text(
+            "# Python packages installed in this workspace\n\n"
+            "_None yet — use `install_package` to request one._\n",
+            encoding="utf-8",
+        )
 
     return str(workspace)
 

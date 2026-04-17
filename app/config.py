@@ -43,6 +43,25 @@ class Config:
     # Rate limiting
     RATELIMIT_STORAGE_URI = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
+    # Per-workspace Python environment.
+    #   * PACKAGE_ALLOWLIST: comma-separated pypi names that auto-install. Others
+    #     need admin approval from the dashboard.
+    #   * VENV_BASE_PACKAGES: installed automatically into every new workspace
+    #     venv so tools/skills have a sensible starting toolbox.
+    #   * PIP_INSTALL_TIMEOUT_SECONDS: hard cap on any `pip install` subprocess.
+    #   * WORKSPACE_TOOL_TIMEOUT_SECONDS: hard cap on workspace tool subprocess
+    #     calls (builtin tools still run in-process).
+    PACKAGE_ALLOWLIST = os.environ.get(
+        "PACKAGE_ALLOWLIST",
+        "requests,httpx,beautifulsoup4,lxml,feedparser,markdown,pyyaml,python-dateutil,pytz,pydantic",
+    )
+    VENV_BASE_PACKAGES = os.environ.get(
+        "VENV_BASE_PACKAGES",
+        "httpx,pydantic",
+    )
+    PIP_INSTALL_TIMEOUT_SECONDS = int(os.environ.get("PIP_INSTALL_TIMEOUT_SECONDS", "180"))
+    WORKSPACE_TOOL_TIMEOUT_SECONDS = int(os.environ.get("WORKSPACE_TOOL_TIMEOUT_SECONDS", "30"))
+
     # Session
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"

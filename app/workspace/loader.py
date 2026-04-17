@@ -4,7 +4,7 @@ from flask import current_app
 
 from app.workspace.manager import read_file
 
-WORKSPACE_FILES = ("SOUL.md", "AGENTS.md", "MEMORY.md", "TOOLS.md")
+WORKSPACE_FILES = ("SOUL.md", "AGENTS.md", "MEMORY.md", "TOOLS.md", "PACKAGES.md")
 
 
 def load_security_baseline() -> str:
@@ -35,6 +35,10 @@ def load_memory(agent):
 
 def load_tools(agent):
     return read_file(agent, "TOOLS.md")
+
+
+def load_packages(agent):
+    return read_file(agent, "PACKAGES.md")
 
 
 def load_full_context(agent):
