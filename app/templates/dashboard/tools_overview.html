@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+
+{% block title %}Tools - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Tools catalog</h1>
+    <small>{{ builtins|length }} built-in tool(s) + {{ grouped|length }} workspace tool slug(s).</small>
+</div>
+
+<div class="section">
+    <h2>Built-in tools</h2>
+    <p style="color: var(--text-muted); margin-bottom: 12px;">
+        Registered by the runtime and available to every agent.
+    </p>
+    {% if builtins %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Name</th>
+                <th>Description</th>
+                <th>Parameters</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for tool in builtins %}
+            <tr>
+                <td><strong>{{ tool.name }}</strong></td>
+                <td>{{ tool.description }}</td>
+                <td>
+                    {% set props = tool.parameters.get('properties', {}) %}
+                    {% if props %}
+                    {% set required = tool.parameters.get('required', []) %}
+                    <small>
+                        {% for pname, pdef in props.items() %}
+                        <code>{{ pname }}{% if pname in required %}*{% endif %}</code>{% if not loop.last %}, {% endif %}
+                        {% endfor %}
+                    </small>
+                    {% else %}
+                    <small>—</small>
+                    {% endif %}
+                </td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty-state">No built-in tools registered.</p>
+    {% endif %}
+</div>
+
+<div class="section">
+    <h2>Workspace tools</h2>
+    <p style="color: var(--text-muted); margin-bottom: 12px;">
+        Defined per agent under <code>tools/</code> in the agent workspace. Sync from each agent's tools panel.
+    </p>
+    {% if grouped %}
+    <table class="table">
+        <thead>
+            <tr>
+                <th>Tool</th>
+                <th>Version</th>
+                <th>Owned by</th>
+                <th>Timeout</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for g in grouped %}
+            {% for tool in g['items'] %}
+            <tr>
+                {% if loop.first %}
+                <td rowspan="{{ g['items']|length }}">
+                    <strong>{{ g['name'] }}</strong><br>
+                    <small><code>{{ g['slug'] }}</code></small>
+                    {% if tool.description %}<br><small>{{ tool.description }}</small>{% endif %}
+                </td>
+                {% endif %}
+                <td>{{ tool.version }}</td>
+                <td>
+                    <a href="{{ url_for('dashboard.tools_list', agent_id=tool.agent_id) }}">{{ tool.agent.name }}</a>
+                    <span class="badge badge-{{ 'active' if tool.enabled else 'inactive' }}">{{ 'enabled' if tool.enabled else 'disabled' }}</span>
+                </td>
+                <td>{{ tool.timeout or '-' }}s</td>
+            </tr>
+            {% endfor %}
+            {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <p class="empty-state">No workspace tools have been synced yet. Open an agent and click "Sync from Workspace" on its Tools panel.</p>
+    {% endif %}
+</div>
+{% endblock %}

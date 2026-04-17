@@ -4,12 +4,53 @@ from flask_login import login_required
 from app.dashboard import dashboard_bp
 from app.extensions import db
 from app.models.agent import Agent
+from app.runtime.tool_registry import _registry, register_builtin_tools
 from app.services.tool_service import (
     list_tools,
     sync_agent_tools,
     test_tool,
     toggle_tool,
 )
+
+
+@dashboard_bp.route("/tools")
+@login_required
+def tools_overview():
+    """Catalog of every tool available to agents.
+
+    Split in two sections: built-in tools baked into the runtime (available to
+    all agents) and workspace tools registered per-agent under ``tools/`` in
+    each agent's workspace.
+    """
+    if not _registry:
+        register_builtin_tools()
+
+    builtins = sorted(
+        (
+            {
+                "name": td.name,
+                "description": td.description,
+                "parameters": td.parameters,
+            }
+            for td in _registry.values()
+        ),
+        key=lambda t: t["name"],
+    )
+
+    workspace_tools = list_tools()
+    groups: dict[str, dict] = {}
+    for t in workspace_tools:
+        g = groups.setdefault(t.slug, {"slug": t.slug, "name": t.name, "items": []})
+        g["items"].append(t)
+        if t.name and not g["name"]:
+            g["name"] = t.name
+    grouped = sorted(groups.values(), key=lambda g: g["name"].lower())
+
+    return render_template(
+        "dashboard/tools_overview.html",
+        builtins=builtins,
+        grouped=grouped,
+    )
 
 
 @dashboard_bp.route("/agents/<int:agent_id>/tools")
