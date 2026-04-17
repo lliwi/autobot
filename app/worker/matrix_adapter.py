@@ -44,7 +44,7 @@ class MatrixBot:
             loop.close()
 
     async def _async_main(self):
-        from nio import AsyncClient, LoginResponse, RoomMessageText
+        from nio import AsyncClient, InviteMemberEvent, LoginResponse, RoomMessageText
 
         homeserver = self.app.config["MATRIX_HOMESERVER"]
         user_id = self.app.config["MATRIX_USER_ID"]
@@ -77,6 +77,12 @@ class MatrixBot:
             RoomMessageText,
         )
 
+        # Auto-accept room invites
+        client.add_event_callback(
+            lambda room, event: self._handle_invite(client, room, event),
+            InviteMemberEvent,
+        )
+
         # Initial sync to skip old messages
         await client.sync(timeout=10000, full_state=True)
 
@@ -93,6 +99,37 @@ class MatrixBot:
 
         await client.close()
 
+    async def _handle_invite(self, client, room, event):
+        """Auto-join rooms the bot is invited to, respecting allowlists.
+
+        The bot only accepts invites from users allowed to DM it (for 2-member
+        rooms) or allowed in general (for groups). Invites from blocked users
+        are simply ignored — they'll sit in the invite list on the homeserver.
+        """
+        if event.state_key != client.user_id:
+            return
+
+        with self.app.app_context():
+            from app.services.matrix_service import (
+                is_dm_user_allowed,
+                is_user_allowed,
+            )
+
+            inviter = event.sender
+            is_dm = room.member_count <= 2
+            allowed = is_dm_user_allowed(inviter) if is_dm else is_user_allowed(inviter)
+            if not allowed:
+                logger.info(f"Matrix invite from {inviter} for {room.room_id} — blocked by allowlist")
+                return
+
+        logger.info(f"Matrix auto-joining {room.room_id} (invited by {event.sender})")
+        for _ in range(3):
+            result = await client.join(room.room_id)
+            if hasattr(result, "room_id"):
+                return
+            await asyncio.sleep(2)
+        logger.error(f"Failed to join {room.room_id} after retries")
+
     async def _handle_message(self, client, room, event):
         """Handle an incoming Matrix message."""
         from nio import RoomSendResponse
@@ -104,15 +141,21 @@ class MatrixBot:
         with self.app.app_context():
             from app.services.matrix_service import (
                 get_agent_for_room,
+                is_dm_user_allowed,
                 is_room_allowed,
                 is_user_allowed,
                 should_respond,
             )
 
+            is_dm = room.member_count <= 2
+
             # Check allowlists
             if not is_room_allowed(room.room_id):
                 return
-            if not is_user_allowed(event.sender):
+            if is_dm:
+                if not is_dm_user_allowed(event.sender):
+                    return
+            elif not is_user_allowed(event.sender):
                 return
 
             # Get agent for this room

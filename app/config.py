@@ -33,6 +33,7 @@ class Config:
     MATRIX_PASSWORD = os.environ.get("MATRIX_PASSWORD", "")
     MATRIX_ALLOWED_ROOMS = os.environ.get("MATRIX_ALLOWED_ROOMS", "")  # comma-separated
     MATRIX_ALLOWED_USERS = os.environ.get("MATRIX_ALLOWED_USERS", "")  # comma-separated
+    MATRIX_ALLOWED_DM_USERS = os.environ.get("MATRIX_ALLOWED_DM_USERS", "")  # DM-only allowlist; empty = fall back to MATRIX_ALLOWED_USERS
     MATRIX_GROUP_POLICY = os.environ.get("MATRIX_GROUP_POLICY", "mention")  # always, mention, allowlist
 
     # Scheduler

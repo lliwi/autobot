@@ -58,7 +58,7 @@ def register_cli(app):
 
     @app.cli.command("onboard")
     def onboard():
-        """Interactive initial setup: database, admin user, encryption key, OAuth and orchestrator agent."""
+        """Interactive initial setup: database, admin user, encryption key, OAuth, default agents, Matrix."""
         from cryptography.fernet import Fernet
 
         from app.models.user import User
@@ -69,7 +69,7 @@ def register_cli(app):
         click.echo()
 
         # 1. Run migrations
-        click.echo("[1/5] Applying database migrations...")
+        click.echo("[1/6] Applying database migrations...")
         from flask_migrate import upgrade
 
         upgrade()
@@ -77,7 +77,7 @@ def register_cli(app):
         click.echo()
 
         # 2. Create admin user
-        click.echo("[2/5] Admin user setup")
+        click.echo("[2/6] Admin user setup")
         existing = User.query.first()
         if existing:
             click.echo(f"  Admin user already exists: {existing.email}")
@@ -99,7 +99,7 @@ def register_cli(app):
         click.echo()
 
         # 3. Encryption key
-        click.echo("[3/5] Token encryption key")
+        click.echo("[3/6] Token encryption key")
         current_key = app.config.get("TOKEN_ENCRYPTION_KEY", "")
         if current_key:
             click.echo("  TOKEN_ENCRYPTION_KEY is already set in .env")
@@ -111,13 +111,18 @@ def register_cli(app):
         click.echo()
 
         # 4. Codex OAuth
-        click.echo("[4/5] OpenAI Codex OAuth")
+        click.echo("[4/6] OpenAI Codex OAuth")
         _run_codex_login(app)
         click.echo()
 
         # 5. Default agents (orchestrator + reviewer)
-        click.echo("[5/5] Default agents (orchestrator + reviewer)")
+        click.echo("[5/6] Default agents (orchestrator + reviewer)")
         _run_default_agents_setup(app)
+        click.echo()
+
+        # 6. Matrix channel (optional)
+        click.echo("[6/6] Matrix channel (optional)")
+        _run_matrix_setup(app)
         click.echo()
 
         click.echo("=" * 50)
@@ -125,6 +130,11 @@ def register_cli(app):
         click.echo()
         click.echo("  Open http://localhost:5000")
         click.echo("=" * 50)
+
+    @app.cli.command("setup-matrix")
+    def setup_matrix():
+        """Interactive Matrix channel setup (skips the rest of onboard)."""
+        _run_matrix_setup(app)
 
     @app.cli.command("setup-default-agents")
     def setup_default_agents():
@@ -187,6 +197,74 @@ def _run_codex_login(app):
 
     click.echo()
     click.echo(f"  ✓ Codex connected. account_id={token.account_id}")
+
+
+def _run_matrix_setup(app):
+    """Interactive Matrix channel setup.
+
+    Collects homeserver/user_id/password + optional allowlists, validates the
+    credentials against the homeserver, and rewrites the project .env in place.
+    Safe to skip — Matrix is an optional channel.
+    """
+    import click
+
+    from app.services import matrix_setup
+
+    already_configured = bool(app.config.get("MATRIX_HOMESERVER"))
+    if already_configured:
+        click.echo(f"  Matrix is already configured for {app.config.get('MATRIX_USER_ID', '?')}")
+        if not click.confirm("  Reconfigure?", default=False):
+            return
+    else:
+        if not click.confirm("  Configure Matrix now?", default=False):
+            click.echo("  Skipped. You can run `flask setup-matrix` later.")
+            return
+
+    homeserver = click.prompt("  Homeserver URL", default=app.config.get("MATRIX_HOMESERVER") or "https://matrix.org")
+    user_id = click.prompt("  Bot user id (@user:server.tld)", default=app.config.get("MATRIX_USER_ID") or "")
+    password = click.prompt("  Bot password", hide_input=True, confirmation_prompt=True)
+    allowed_rooms = click.prompt(
+        "  Allowed rooms (CSV, blank = all rooms)",
+        default=app.config.get("MATRIX_ALLOWED_ROOMS") or "",
+        show_default=False,
+    )
+    allowed_users = click.prompt(
+        "  Allowed users (CSV, blank = all users)",
+        default=app.config.get("MATRIX_ALLOWED_USERS") or "",
+        show_default=False,
+    )
+    allowed_dm_users = click.prompt(
+        "  DM-only allowlist (CSV, blank = fall back to allowed users)",
+        default=app.config.get("MATRIX_ALLOWED_DM_USERS") or "",
+        show_default=False,
+    )
+    group_policy = click.prompt(
+        "  Group response policy (always/mention/allowlist)",
+        default=app.config.get("MATRIX_GROUP_POLICY") or "mention",
+    )
+
+    click.echo("  Validating credentials against the homeserver...")
+    result = matrix_setup.configure(
+        homeserver=homeserver,
+        user_id=user_id,
+        password=password,
+        allowed_rooms=allowed_rooms,
+        allowed_users=allowed_users,
+        allowed_dm_users=allowed_dm_users,
+        group_policy=group_policy,
+    )
+
+    if not result["ok"]:
+        click.echo(f"  ✗ {result['message']}")
+        return
+
+    click.echo(f"  ✓ {result['message']}")
+    click.echo(f"  ✓ Written to {result['env_path']}")
+    for key, value in (result.get("values") or {}).items():
+        click.echo(f"    {key}={value}")
+    click.echo()
+    click.echo("  Restart the worker so the new env vars take effect:")
+    click.echo("    docker compose restart worker")
 
 
 DEFAULT_AGENT_SPECS = [

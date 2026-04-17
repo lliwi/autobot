@@ -12,6 +12,20 @@ def is_user_allowed(user_id):
     return user_id in allowed_list
 
 
+def is_dm_user_allowed(user_id):
+    """Check if a user is allowed to DM the bot.
+
+    Uses ``MATRIX_ALLOWED_DM_USERS`` when configured. When empty, falls back to
+    the generic ``MATRIX_ALLOWED_USERS`` allowlist so admins only need to opt
+    in to the DM-specific list when they want stricter-than-global gating.
+    """
+    allowed = current_app.config.get("MATRIX_ALLOWED_DM_USERS", "")
+    if not allowed:
+        return is_user_allowed(user_id)
+    allowed_list = [u.strip() for u in allowed.split(",") if u.strip()]
+    return user_id in allowed_list
+
+
 def is_room_allowed(room_id):
     """Check if a Matrix room is in the allowlist."""
     allowed = current_app.config.get("MATRIX_ALLOWED_ROOMS", "")

@@ -48,8 +48,9 @@ Todas las variables se definen en `.env`. Ver `.env.example` para referencia.
 | `MATRIX_HOMESERVER` | URL del servidor Matrix (e.g. `https://matrix.org`) | Para Matrix |
 | `MATRIX_USER_ID` | User ID del bot Matrix (e.g. `@bot:matrix.org`) | Para Matrix |
 | `MATRIX_PASSWORD` | Contraseña del bot Matrix | Para Matrix |
-| `MATRIX_ALLOWED_ROOMS` | IDs de salas permitidas, separados por coma | No |
-| `MATRIX_ALLOWED_USERS` | User IDs permitidos, separados por coma | No |
+| `MATRIX_ALLOWED_ROOMS` | IDs de salas permitidas, separados por coma (vacío = todas) | No |
+| `MATRIX_ALLOWED_USERS` | User IDs permitidos, separados por coma (vacío = todos) | No |
+| `MATRIX_ALLOWED_DM_USERS` | Allowlist específica para DMs (vacío = usa `MATRIX_ALLOWED_USERS`) | No |
 | `MATRIX_GROUP_POLICY` | Política de respuesta en grupo: `always`, `mention`, `allowlist` | No |
 | `SCHEDULER_ENABLED` | Activar scheduler (default: `true`) | No |
 | `HEARTBEAT_INTERVAL_MINUTES` | Intervalo de heartbeat en minutos (default: `15`) | No |
