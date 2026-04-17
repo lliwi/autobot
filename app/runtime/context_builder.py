@@ -1,7 +1,13 @@
 from flask import current_app
 
 from app.models.message import Message
-from app.workspace.loader import load_agents, load_memory, load_soul, load_tools
+from app.workspace.loader import (
+    load_agents,
+    load_memory,
+    load_security_baseline,
+    load_soul,
+    load_tools,
+)
 
 TOOL_PROTOCOL = """## Tool Usage Protocol
 
@@ -46,12 +52,18 @@ def build_context(agent, session, user_message):
     max_history = current_app.config["MAX_HISTORY_MESSAGES"]
 
     # System prompt from workspace files
+    security = load_security_baseline()
     soul = load_soul(agent)
     tools_doc = load_tools(agent)
     agents_doc = load_agents(agent)
     memory = load_memory(agent)
 
-    system_parts = [TOOL_PROTOCOL]
+    # Security baseline goes first so downstream instructions can't override it
+    # by sheer prompt-order. TOOL_PROTOCOL follows with the operational rules.
+    system_parts = []
+    if security:
+        system_parts.append(f"# Platform security baseline (non-negotiable)\n{security}")
+    system_parts.append(TOOL_PROTOCOL)
     if soul:
         system_parts.append(f"## Identity and Principles\n{soul}")
     if tools_doc:
