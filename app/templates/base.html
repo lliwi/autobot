@@ -20,6 +20,7 @@
                 <li><a href="{{ url_for('dashboard.agents_list') }}" class="{% if request.endpoint and 'agent' in request.endpoint and 'topology' not in request.endpoint and 'skill' not in request.endpoint %}active{% endif %}">Agents</a></li>
                 <li><a href="{{ url_for('dashboard.skills_overview') }}" class="{% if request.endpoint and ('skill' in request.endpoint) %}active{% endif %}">Skills</a></li>
                 <li><a href="{{ url_for('dashboard.tools_overview') }}" class="{% if request.endpoint and ('tool' in request.endpoint) %}active{% endif %}">Tools</a></li>
+                <li><a href="{{ url_for('dashboard.credentials_list') }}" class="{% if request.endpoint and ('credential' in request.endpoint) %}active{% endif %}">Credentials</a></li>
                 <li><a href="{{ url_for('dashboard.topology') }}" class="{% if request.endpoint == 'dashboard.topology' %}active{% endif %}">Topology</a></li>
                 <li><a href="{{ url_for('dashboard.patches_list') }}" class="{% if request.endpoint == 'dashboard.patches_list' or request.endpoint == 'dashboard.patch_detail' %}active{% endif %}">Patches</a></li>
                 <li><a href="{{ url_for('dashboard.approval_rules_list') }}" class="{% if request.endpoint and 'approval_rule' in request.endpoint %}active{% endif %}">Approval Rules</a></li>

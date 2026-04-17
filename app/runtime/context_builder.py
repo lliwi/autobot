@@ -23,6 +23,10 @@ Built-in tool cheatsheet (always call with JSON objects like these):
 - `delegate_task` — `{"target_name": "reviewer", "message": "review the patch #42"}`.
 - `schedule_task` — `{"schedule_expr": "0 18 * * *", "message": "...prompt to run..."}`. Use when the user asks for a recurring/daily/weekly task. 5-field cron, UTC.
 - `list_scheduled_tasks` / `cancel_scheduled_task` — manage this agent's scheduled tasks (`cancel_scheduled_task` needs `{"task_id": N}`).
+- `get_credential` — `{"name": "github_token"}`. Returns `{type: "token", value}` or `{type: "user_password", username, password}` (agent-scoped first, then global). Treat values as sensitive: never echo them to the user or write them to workspace files.
+- `list_credentials` — no args. Returns names, types, descriptions (and usernames for user_password entries) — no secret values.
+- `set_credential` — `{"name": "...", "value": "...", "description": "..."}` for a single-value token, or `{"name": "...", "credential_type": "user_password", "username": "...", "value": "<password>"}` for a user+password pair. Always agent-scoped.
+- `delete_credential` — `{"name": "..."}`. Removes an agent-scoped credential.
 - `get_current_time` — no args. Returns ISO-8601 UTC.
 - `list_subagents` / `list_patches` — no required args.
 
