@@ -164,6 +164,40 @@ def set_credential(name: str, value: str, description: str | None = None,
     return row
 
 
+def update_credential(credential_id: int, *, value: str | None = None,
+                      username: str | None = None,
+                      description: str | None = None) -> Credential:
+    """Update an existing credential by id.
+
+    Only fields whose parameter is provided are changed:
+      * ``value``: empty/None → keep existing encrypted_value; otherwise re-encrypt.
+      * ``username``: ignored for ``token`` rows. For ``user_password`` an empty
+        string is treated as "unchanged" (so the admin can leave the field as-is
+        without wiping it). Pass a non-empty string to change it.
+      * ``description``: ``None`` keeps existing, any string (including "") replaces it.
+
+    Name, credential_type, and agent_id cannot be changed here — those would
+    affect unique keys/scoping semantics; delete and recreate instead.
+    """
+    row = db.session.get(Credential, credential_id)
+    if row is None:
+        raise CredentialError(f"credential {credential_id} not found")
+
+    if value:
+        row.encrypted_value = _encrypt(value)
+
+    if row.credential_type == "user_password" and username is not None:
+        clean = username.strip()
+        if clean:
+            row.username = clean
+
+    if description is not None:
+        row.description = description or None
+
+    db.session.commit()
+    return row
+
+
 def delete_credential(credential_id: int) -> bool:
     row = db.session.get(Credential, credential_id)
     if row is None:

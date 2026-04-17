@@ -11,6 +11,7 @@ from app.services.credential_service import (
     reveal_credential,
     set_credential,
     to_dict,
+    update_credential,
 )
 
 
@@ -61,6 +62,39 @@ def credential_create():
     scope = f"agent '{row.agent.name}'" if row.agent_id else "global"
     flash(f"Credential '{row.name}' saved ({scope}).", "success")
     return redirect(url_for("dashboard.credentials_list"))
+
+
+@dashboard_bp.route("/credentials/<int:credential_id>/edit", methods=["GET", "POST"])
+@login_required
+def credential_edit(credential_id):
+    row = get_credential(credential_id)
+    if row is None:
+        flash("Credential not found.", "danger")
+        return redirect(url_for("dashboard.credentials_list"))
+
+    if request.method == "POST":
+        value = request.form.get("value") or ""
+        username = request.form.get("username")
+        description = request.form.get("description")
+        # Normalize "" vs None semantics: an empty description field should
+        # clear the stored note, so forward the raw form value (may be "").
+        try:
+            update_credential(
+                credential_id,
+                value=value or None,
+                username=username if username is not None else None,
+                description=description if description is not None else None,
+            )
+        except CredentialError as e:
+            flash(str(e), "danger")
+            return redirect(url_for("dashboard.credential_edit", credential_id=credential_id))
+        flash(f"Credential '{row.name}' updated.", "success")
+        return redirect(url_for("dashboard.credentials_list"))
+
+    return render_template(
+        "dashboard/credentials_edit.html",
+        credential=to_dict(row),
+    )
 
 
 @dashboard_bp.route("/credentials/<int:credential_id>/delete", methods=["POST"])
