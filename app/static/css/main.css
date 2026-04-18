@@ -840,6 +840,184 @@ pre.code, pre {
     font-family: var(--mono);
 }
 
+/* ---------- Panel ---------- */
+.panel {
+    background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: var(--r-md);
+}
+.panel-head {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    border-bottom: 1px solid var(--border);
+    font-size: 10px;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--fg-dim);
+    font-weight: 700;
+}
+.panel-body { padding: 14px 16px; }
+
+/* ---------- Overview page ---------- */
+.overview-stats {
+    grid-template-columns: repeat(4, 1fr);
+}
+.overview-stats .stat .label {
+    font-weight: 600;
+}
+.overview-stats .stat .value {
+    font-size: 28px;
+    line-height: 1.1;
+    margin-top: 8px;
+}
+.overview-stats .stat .value .unit {
+    font-size: 14px;
+    font-weight: 500;
+    color: var(--fg-faint);
+    margin-left: 2px;
+    letter-spacing: 0;
+}
+.overview-stats .stat .value.amber { color: var(--amber); }
+.overview-stats .stat .value.red   { color: var(--red); }
+.overview-stats .stat .sub {
+    margin-top: 10px;
+    font-size: 11px;
+    color: var(--fg-faint);
+    letter-spacing: 0;
+    text-transform: none;
+}
+
+.overview-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 2fr) minmax(320px, 1fr);
+    gap: 16px;
+    margin-top: 20px;
+    align-items: stretch;
+}
+
+/* Activity bar chart */
+.bar-chart {
+    display: flex;
+    align-items: flex-end;
+    gap: 4px;
+    height: 180px;
+    padding: 8px 0 4px;
+}
+.bar-col {
+    flex: 1;
+    min-width: 3px;
+    height: 100%;
+    position: relative;
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+}
+.bar-col .bar {
+    width: 100%;
+    background: var(--blue);
+    opacity: 0.85;
+    border-radius: 1px 1px 0 0;
+    min-height: 2px;
+}
+.bar-col .bar.now { background: var(--red); opacity: 1; }
+.bar-col .bar-err {
+    position: absolute;
+    bottom: 0;
+    width: 100%;
+    background: var(--red);
+    opacity: 0.7;
+    border-radius: 1px 1px 0 0;
+    min-height: 2px;
+}
+.bar-axis {
+    display: flex;
+    justify-content: space-between;
+    font-size: 10px;
+    color: var(--fg-faint);
+    padding: 6px 0 4px;
+    border-top: 1px solid var(--border);
+    letter-spacing: 0.04em;
+}
+.bar-legend {
+    display: flex;
+    gap: 24px;
+    margin-top: 14px;
+    font-size: 11px;
+    color: var(--fg-dim);
+}
+.bar-legend .sw {
+    display: inline-block;
+    width: 10px;
+    height: 10px;
+    margin-right: 6px;
+    vertical-align: middle;
+    border-radius: 1px;
+}
+.bar-legend .sw.blue { background: var(--blue); }
+.bar-legend .sw.red  { background: var(--red); }
+
+/* Events table */
+.events-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+}
+.events-table td {
+    padding: 7px 0;
+    vertical-align: middle;
+    border-bottom: 1px dashed var(--border);
+}
+.events-table tr:last-child td { border-bottom: none; }
+.events-table .ev-time {
+    color: var(--fg-faint);
+    font-variant-numeric: tabular-nums;
+    width: 70px;
+    white-space: nowrap;
+    padding-right: 10px;
+    font-size: 11px;
+}
+.events-table .ev-kind {
+    width: 96px;
+    padding-right: 10px;
+}
+.events-table .kind {
+    display: inline-block;
+    padding: 2px 8px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    border-radius: 2px;
+    text-align: center;
+    min-width: 76px;
+    border: 1px solid transparent;
+}
+.events-table .kind-patch,
+.events-table .kind-review,
+.events-table .kind-credential,
+.events-table .kind-scheduler {
+    color: var(--green);
+    background: oklch(0.72 0.15 155 / 0.14);
+    border-color: oklch(0.72 0.15 155 / 0.4);
+}
+.events-table .kind-tool,
+.events-table .kind-agent {
+    color: var(--blue);
+    background: var(--blue-bg);
+    border-color: var(--blue-dim);
+}
+.events-table .ev-text {
+    color: var(--fg);
+    word-break: break-word;
+    line-height: 1.4;
+}
+
+@media (max-width: 1100px) {
+    .overview-stats { grid-template-columns: repeat(2, 1fr); }
+    .overview-grid { grid-template-columns: 1fr; }
+}
+
 /* Scrollbar */
 *::-webkit-scrollbar { width: 10px; height: 10px; }
 *::-webkit-scrollbar-track { background: transparent; }
