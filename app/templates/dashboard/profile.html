@@ -8,25 +8,155 @@
     <small>Account settings for {{ current_user.email }}.</small>
 </div>
 
-<div class="form-card" style="max-width: 640px;">
-    <h3>Matrix link</h3>
-    <p class="empty-state" style="text-align: left; padding: 0 0 12px 0;">
-        Link your Matrix ID so you can run approval commands (<code>/pending</code>,
-        <code>/approve patch &lt;id&gt;</code>, etc.) from your Matrix client.
-        Format: <code>@user:homeserver.tld</code>.
-    </p>
-    <form method="POST">
-        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <div class="form-group">
-            <label>Matrix ID</label>
-            <input type="text" name="matrix_id"
-                   value="{{ current_user.matrix_id or '' }}"
-                   placeholder="@alice:matrix.org">
-            <small>Leave empty to unlink.</small>
+<div style="display: grid; gap: 24px; max-width: 720px;">
+
+    <!-- Avatar -->
+    <div class="form-card">
+        <h3>Avatar</h3>
+        <div style="display: flex; gap: 16px; align-items: center; margin-bottom: 16px;">
+            {% if current_user.avatar_filename %}
+                <img src="{{ url_for('dashboard.serve_avatar', filename=current_user.avatar_filename) }}"
+                     alt="avatar"
+                     style="width: 96px; height: 96px; border-radius: 50%; border: 1px solid var(--border); object-fit: cover;">
+            {% else %}
+                <div style="width: 96px; height: 96px; border-radius: 50%; border: 1px solid var(--border);
+                            display: flex; align-items: center; justify-content: center;
+                            background: var(--bg-elevated); font-size: 32px; color: var(--text-muted);">
+                    {{ current_user.email[0]|upper }}
+                </div>
+            {% endif %}
+            <div style="flex: 1;">
+                <form method="POST" action="{{ url_for('dashboard.profile_avatar_upload') }}"
+                      enctype="multipart/form-data" style="margin-bottom: 8px;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <div class="form-group" style="margin-bottom: 8px;">
+                        <label>Upload new (PNG/JPG/WEBP/GIF, max 2 MB)</label>
+                        <input type="file" name="avatar" accept="image/*" required>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm">Upload</button>
+                </form>
+                {% if current_user.avatar_filename %}
+                    <form method="POST" action="{{ url_for('dashboard.profile_avatar_remove') }}"
+                          style="display: inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-danger btn-sm">Remove avatar</button>
+                    </form>
+                {% endif %}
+            </div>
         </div>
-        <div class="form-actions">
-            <button type="submit" class="btn btn-primary">Save</button>
-        </div>
-    </form>
+    </div>
+
+    <!-- Password -->
+    <div class="form-card">
+        <h3>Change password</h3>
+        <form method="POST" action="{{ url_for('dashboard.profile_password') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-group">
+                <label>Current password</label>
+                <input type="password" name="current_password" required>
+            </div>
+            <div class="form-group">
+                <label>New password (min. 8 characters)</label>
+                <input type="password" name="new_password" required minlength="8">
+            </div>
+            <div class="form-group">
+                <label>Confirm new password</label>
+                <input type="password" name="confirm_password" required minlength="8">
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">Update password</button>
+            </div>
+        </form>
+    </div>
+
+    <!-- MFA -->
+    <div class="form-card">
+        <h3>Two-factor authentication (TOTP)</h3>
+        {% if current_user.mfa_enabled %}
+            <p class="empty-state" style="text-align: left; padding: 0 0 12px 0; color: var(--success);">
+                MFA is <strong>enabled</strong>. Disable requires your password and a live code.
+            </p>
+            <form method="POST" action="{{ url_for('dashboard.profile_mfa_disable') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="form-group">
+                    <label>Password</label>
+                    <input type="password" name="password" required>
+                </div>
+                <div class="form-group">
+                    <label>Current 6-digit code</label>
+                    <input type="text" name="code" inputmode="numeric" pattern="[0-9]*"
+                           autocomplete="one-time-code" maxlength="8" required>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-danger">Disable MFA</button>
+                </div>
+            </form>
+        {% elif mfa_pending_secret %}
+            <p class="empty-state" style="text-align: left; padding: 0 0 12px 0;">
+                Scan this QR with your authenticator app, then confirm with a live code.
+            </p>
+            <div style="display: flex; gap: 24px; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap;">
+                <img src="{{ url_for('dashboard.profile_mfa_qr') }}" alt="MFA QR code"
+                     style="width: 200px; height: 200px; background: #fff; padding: 8px; border-radius: var(--radius);">
+                <div style="flex: 1; min-width: 240px;">
+                    <div class="form-group">
+                        <label>Manual secret (if you can't scan)</label>
+                        <input type="text" value="{{ mfa_pending_secret }}" readonly
+                               onclick="this.select()" style="font-family: monospace;">
+                    </div>
+                </div>
+            </div>
+            <form method="POST" action="{{ url_for('dashboard.profile_mfa_confirm') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="form-group">
+                    <label>Enter a code from your app to activate</label>
+                    <input type="text" name="code" inputmode="numeric" pattern="[0-9]*"
+                           autocomplete="one-time-code" maxlength="8" required autofocus>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Activate MFA</button>
+                </div>
+            </form>
+            <form method="POST" action="{{ url_for('dashboard.profile_mfa_start') }}" style="margin-top: 8px;">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-sm">Regenerate secret</button>
+            </form>
+        {% else %}
+            <p class="empty-state" style="text-align: left; padding: 0 0 12px 0;">
+                MFA adds a second factor at sign-in via a TOTP authenticator app
+                (Google Authenticator, 1Password, Authy…).
+            </p>
+            <form method="POST" action="{{ url_for('dashboard.profile_mfa_start') }}">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Start MFA setup</button>
+                </div>
+            </form>
+        {% endif %}
+    </div>
+
+    <!-- Matrix link -->
+    <div class="form-card">
+        <h3>Matrix link</h3>
+        <p class="empty-state" style="text-align: left; padding: 0 0 12px 0;">
+            Link your Matrix ID so you can run approval commands (<code>/pending</code>,
+            <code>/approve patch &lt;id&gt;</code>, etc.) from your Matrix client.
+            Format: <code>@user:homeserver.tld</code>.
+        </p>
+        <form method="POST" action="{{ url_for('dashboard.profile_matrix') }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <div class="form-group">
+                <label>Matrix ID</label>
+                <input type="text" name="matrix_id"
+                       value="{{ current_user.matrix_id or '' }}"
+                       placeholder="@alice:matrix.org">
+                <small>Leave empty to unlink.</small>
+            </div>
+            <div class="form-actions">
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
+    </div>
+
 </div>
 {% endblock %}

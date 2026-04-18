@@ -30,8 +30,25 @@
                 <li><a href="{{ url_for('dashboard.metrics') }}" class="{% if request.endpoint == 'dashboard.metrics' %}active{% endif %}">Metrics</a></li>
             </ul>
             <div class="sidebar-footer">
-                <span>{{ current_user.email }}</span>
-                <a href="{{ url_for('dashboard.profile') }}">Profile</a>
+                <a href="{{ url_for('dashboard.profile') }}"
+                   title="Profile"
+                   style="display: flex; align-items: center; gap: 8px; color: var(--text); text-decoration: none; flex: 1; min-width: 0;">
+                    {% if current_user.avatar_filename %}
+                        <img src="{{ url_for('dashboard.serve_avatar', filename=current_user.avatar_filename) }}"
+                             alt="avatar"
+                             style="width: 28px; height: 28px; border-radius: 50%; object-fit: cover; flex-shrink: 0;">
+                    {% else %}
+                        <span style="width: 28px; height: 28px; border-radius: 50%;
+                                     background: var(--bg-elevated); border: 1px solid var(--border);
+                                     display: inline-flex; align-items: center; justify-content: center;
+                                     font-size: 12px; color: var(--text-muted); flex-shrink: 0;">
+                            {{ current_user.email[0]|upper }}
+                        </span>
+                    {% endif %}
+                    <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px;">
+                        {{ current_user.email }}
+                    </span>
+                </a>
                 <a href="{{ url_for('dashboard.logout') }}">Logout</a>
             </div>
         </nav>

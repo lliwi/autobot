@@ -66,6 +66,14 @@ class Config:
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"
 
+    # Uploads
+    AVATAR_UPLOAD_DIR = os.environ.get(
+        "AVATAR_UPLOAD_DIR",
+        os.path.join(os.path.dirname(__file__), "..", "instance", "avatars"),
+    )
+    AVATAR_MAX_BYTES = int(os.environ.get("AVATAR_MAX_BYTES", str(2 * 1024 * 1024)))  # 2 MB
+    MFA_ISSUER = os.environ.get("MFA_ISSUER", "Autobot")
+
 
 class DevelopmentConfig(Config):
     DEBUG = True
