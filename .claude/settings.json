@@ -48,7 +48,8 @@
       "Bash(curl -s -o /dev/null -w \"API HTTP %{http_code}\\\\n\" \"http://localhost:5000/api/metrics/codex-quota\")",
       "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5000/profile)",
       "WebFetch(domain:api.anthropic.com)",
-      "Bash(tar -xf /tmp/autobot-design.tar -C /tmp/autobot-design)"
+      "Bash(tar -xf /tmp/autobot-design.tar -C /tmp/autobot-design)",
+      "Bash(gunzip -c /home/llibert/.claude/projects/-home-llibert-Documents-development-flask-autobot/fd20b1cf-411e-4dc8-acb7-dedee64194ca/tool-results/webfetch-1776524331199-3br3q8.bin)"
     ],
     "additionalDirectories": [
       "/tmp"
