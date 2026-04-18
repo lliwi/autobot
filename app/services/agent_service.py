@@ -47,6 +47,26 @@ def update_agent(agent, data):
         agent.model_name = data["model_name"]
     if "status" in data and data["status"] in ("active", "inactive"):
         agent.status = data["status"]
+    if "review_effort" in data and data["review_effort"] != "":
+        try:
+            effort = int(data["review_effort"])
+        except (TypeError, ValueError):
+            raise ValueError("review_effort must be an integer between 0 and 10")
+        if effort < 0 or effort > 10:
+            raise ValueError("review_effort must be between 0 and 10")
+        agent.review_effort = effort
+    if "review_token_budget_daily" in data:
+        raw = data["review_token_budget_daily"]
+        if raw in (None, "", "none", "null"):
+            agent.review_token_budget_daily = None
+        else:
+            try:
+                budget = int(raw)
+            except (TypeError, ValueError):
+                raise ValueError("review_token_budget_daily must be a positive integer or empty")
+            if budget < 0:
+                raise ValueError("review_token_budget_daily must be >= 0")
+            agent.review_token_budget_daily = budget or None
     if "parent_agent_id" in data:
         raw = data["parent_agent_id"]
         if raw in (None, "", "none", "null"):

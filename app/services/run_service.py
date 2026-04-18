@@ -37,4 +37,20 @@ def finish_run(run_id, status="completed", input_tokens=None, output_tokens=None
         run.estimated_cost = (input_tokens * 0.00015 + output_tokens * 0.0006) / 1000
 
     db.session.commit()
+
+    if status == "error":
+        try:
+            from app.services import review_queue_service
+
+            review_queue_service.enqueue(
+                agent_id=run.agent_id,
+                event_type="run_failed",
+                payload={"run_id": run.id},
+            )
+        except Exception:
+            import logging
+            logging.getLogger(__name__).exception(
+                "Failed to enqueue run_failed review event for run %s", run_id
+            )
+
     return run

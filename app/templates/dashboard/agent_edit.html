@@ -52,6 +52,42 @@
         </select>
         <small class="help-text">Self and descendants are excluded to prevent cycles.</small>
     </div>
+    <div class="form-group">
+        <label for="review_token_budget_daily">Review token budget (daily)</label>
+        <input type="number" id="review_token_budget_daily" name="review_token_budget_daily"
+               min="0" step="100"
+               value="{{ agent.review_token_budget_daily if agent.review_token_budget_daily else '' }}"
+               placeholder="unlimited">
+        <small class="help-text">
+            Per-UTC-day cap on input+output tokens the reviewer may spend on
+            this agent's behalf. Leave blank for unlimited. When reached, all
+            review events for this agent are silently skipped until midnight UTC.
+            The gate also closes when Codex primary quota passes
+            <strong>{{ codex_pressure_pct }}%</strong>.
+        </small>
+    </div>
+    <div class="form-group">
+        <label for="review_effort">Review effort (0–10)</label>
+        <input type="number" id="review_effort" name="review_effort"
+               min="0" max="10" step="1" value="{{ agent.review_effort }}">
+        <small class="help-text">
+            How much the reviewer sub-agent audits this agent's work.
+            <strong>0</strong> = off.
+            <strong>1</strong> = skill/tool creations.
+            <strong>2</strong> = +scheduled tasks created.
+            <strong>3</strong> = +L2 patch proposals (vote gate).
+            <strong>4</strong> = +failed runs.
+            <strong>5</strong> = +scheduled-task results.
+            <strong>6</strong> = +tool execution errors.
+            <strong>7</strong> = +sampled chats.
+            <strong>8</strong> = +skill execution results.
+            <strong>9</strong> = +every chat turn.
+            <strong>10</strong> = full audit.
+            Higher levels cost more tokens — ramp up when looking for improvements,
+            then back down once the agent stabilises. Set to 0 on the reviewer
+            itself so it doesn't audit its own output.
+        </small>
+    </div>
     <div class="form-actions">
         <button type="submit" class="btn btn-primary">Save</button>
         <a href="{{ url_for('dashboard.agent_detail', agent_id=agent.id) }}" class="btn">Cancel</a>

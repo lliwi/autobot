@@ -18,6 +18,20 @@
     <div class="detail-item">
         <strong>Workspace:</strong> <code>{{ agent.workspace_path }}</code>
     </div>
+    <div class="detail-item">
+        <strong>Review effort:</strong> {{ agent.review_effort }}/10
+        {% if agent.review_effort == 0 %}(off){% endif %}
+    </div>
+    <div class="detail-item">
+        <strong>Review budget (today):</strong>
+        {% if review_budget.budget_daily %}
+            {{ review_budget.spent_today }} / {{ review_budget.budget_daily }} tokens
+            {% if review_budget.over_budget %}<span class="badge badge-error">over budget</span>{% endif %}
+        {% else %}
+            {{ review_budget.spent_today }} tokens spent (no cap)
+        {% endif %}
+        {% if review_budget.codex_pressure %}<span class="badge badge-error">codex quota high — gate closed</span>{% endif %}
+    </div>
     {% if agent.parent_agent %}
     <div class="detail-item">
         <strong>Parent:</strong> <a href="{{ url_for('dashboard.agent_detail', agent_id=agent.parent_agent.id) }}">{{ agent.parent_agent.name }}</a>

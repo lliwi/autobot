@@ -22,6 +22,17 @@ def init_scheduler(app):
         kwargs={"app": app},
     )
 
+    # Drain the reviewer queue periodically.
+    _scheduler.add_job(
+        _drain_review_queue,
+        trigger=IntervalTrigger(seconds=15),
+        id="__drain_review_queue",
+        replace_existing=True,
+        kwargs={"app": app},
+        max_instances=1,
+        coalesce=True,
+    )
+
     # Initial sync
     with app.app_context():
         _sync_jobs(app)
@@ -119,6 +130,21 @@ def _execute_heartbeat(app, agent_id):
             )
         except Exception as e:
             logger.exception(f"Heartbeat tick failed for agent {agent_id}: {e}")
+
+
+def _drain_review_queue(app):
+    """Process any pending ReviewEvent rows. One per tick is enough — the
+    reviewer is a Codex round-trip and we don't want to hog the worker.
+    """
+    with app.app_context():
+        from app.services import review_queue_service
+
+        try:
+            n = review_queue_service.process_batch(max_items=3)
+            if n:
+                logger.info("review-queue drained %d event(s)", n)
+        except Exception:
+            logger.exception("review-queue drain failed")
 
 
 def _execute_cron_task(app, task_id):

@@ -83,6 +83,8 @@ def agent_edit(agent_id):
                 "model_name": request.form.get("model_name", ""),
                 "status": request.form.get("status", agent.status),
                 "parent_agent_id": request.form.get("parent_agent_id", ""),
+                "review_effort": request.form.get("review_effort", ""),
+                "review_token_budget_daily": request.form.get("review_token_budget_daily", ""),
             })
         except ValueError as e:
             flash(str(e), "danger")
@@ -101,12 +103,15 @@ def agent_edit(agent_id):
         Agent.query.filter(~Agent.id.in_(excluded)).order_by(Agent.name).all()
     )
 
+    from app.services import review_service
+
     return render_template(
         "dashboard/agent_edit.html",
         agent=agent,
         available_models=available_models,
         codex_logged_in=codex_auth.is_logged_in(),
         parent_candidates=parent_candidates,
+        codex_pressure_pct=int(review_service.REVIEW_CODEX_PRESSURE_PERCENT),
     )
 
 
@@ -148,11 +153,16 @@ def agent_detail(agent_id):
     workspace_files = load_full_context(agent)
     recent_runs = Run.query.filter_by(agent_id=agent_id).order_by(Run.started_at.desc()).limit(10).all()
 
+    from app.services import review_service
+
+    review_budget = review_service.review_budget_status(agent)
+
     return render_template(
         "dashboard/agent_detail.html",
         agent=agent,
         workspace_files=workspace_files,
         recent_runs=recent_runs,
+        review_budget=review_budget,
     )
 
 

@@ -1,0 +1,114 @@
+{% extends "base.html" %}
+
+{% block title %}Reviewer activity - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Reviewer activity</h1>
+</div>
+
+<div class="stats-grid" style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 0.75rem; margin-bottom: 1rem;">
+    <div class="stat-card"><strong>Done (24h)</strong><div>{{ aggregate.done }}</div></div>
+    <div class="stat-card"><strong>Pending</strong><div>{{ aggregate.pending }}</div></div>
+    <div class="stat-card"><strong>Processing</strong><div>{{ aggregate.processing }}</div></div>
+    <div class="stat-card"><strong>Errors</strong><div>{{ aggregate.error }}</div></div>
+    <div class="stat-card"><strong>Skipped</strong><div>{{ aggregate.skipped }}</div></div>
+    <div class="stat-card"><strong>Tokens (24h)</strong><div>{{ aggregate.tokens_24h }}</div></div>
+</div>
+
+<div class="filters" style="margin-bottom: 1rem;">
+    <form method="GET" style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+        <select name="agent_id" class="form-control" style="max-width: 220px;">
+            <option value="">All agents</option>
+            {% for a in agents %}
+            <option value="{{ a.id }}" {% if filter_agent_id == a.id %}selected{% endif %}>{{ a.name }}</option>
+            {% endfor %}
+        </select>
+        <select name="status" class="form-control" style="max-width: 180px;">
+            <option value="">All statuses</option>
+            {% for s in statuses %}
+            <option value="{{ s }}" {% if filter_status == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+        </select>
+        <select name="event_type" class="form-control" style="max-width: 220px;">
+            <option value="">All event types</option>
+            {% for et in event_types %}
+            <option value="{{ et }}" {% if filter_event_type == et %}selected{% endif %}>{{ et }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-sm">Filter</button>
+        <a href="{{ url_for('dashboard.review_activity') }}" class="btn btn-sm">Reset</a>
+    </form>
+</div>
+
+<p class="help-text" style="margin-bottom: 1rem;">
+    Auto-degrade: Codex primary-window pressure gate trips at <strong>{{ codex_pressure_pct }}%</strong>.
+    Per-agent daily token budgets live on each agent's edit page.
+</p>
+
+{% if events %}
+<table class="table">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Created</th>
+            <th>Agent</th>
+            <th>Event</th>
+            <th>Status</th>
+            <th>Verdict</th>
+            <th>Tokens</th>
+            <th>Patches</th>
+            <th>Summary</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for evt in events %}
+        <tr>
+            <td>{{ evt.id }}</td>
+            <td>{{ evt.created_at.strftime('%Y-%m-%d %H:%M') if evt.created_at else '-' }}</td>
+            <td>
+                {% if evt.agent %}
+                    <a href="{{ url_for('dashboard.agent_detail', agent_id=evt.agent_id) }}">{{ evt.agent.name }}</a>
+                {% else %}-{% endif %}
+            </td>
+            <td><code>{{ evt.event_type }}</code></td>
+            <td>
+                <span class="badge badge-{{ 'active' if evt.status == 'done' else 'warning' if evt.status in ('pending', 'processing') else 'inactive' if evt.status == 'skipped' else 'error' }}">
+                    {{ evt.status }}
+                </span>
+            </td>
+            <td>
+                {% if evt.findings_json and evt.findings_json.verdict %}
+                    <span class="badge badge-{{ 'active' if evt.findings_json.verdict == 'LGTM' else 'warning' if evt.findings_json.verdict == 'ADVISE' else 'error' }}">
+                        {{ evt.findings_json.verdict }}
+                    </span>
+                {% else %}-{% endif %}
+            </td>
+            <td>{{ run_tokens.get(evt.review_run_id, 0) }}</td>
+            <td>
+                {% set pps = patches_by_run.get(evt.review_run_id, []) %}
+                {% if pps %}
+                    {% for p in pps %}
+                        <a href="{{ url_for('dashboard.patch_detail', patch_id=p.id) }}" title="{{ p.target_path }}">#{{ p.id }}</a><br>
+                    {% endfor %}
+                {% else %}-{% endif %}
+            </td>
+            <td style="max-width: 420px;">
+                {% if evt.error %}
+                    <span class="badge badge-error">error</span> <code>{{ evt.error[:200] }}</code>
+                {% elif evt.summary %}
+                    {{ evt.summary[:280] }}{% if evt.summary|length > 280 %}…{% endif %}
+                {% else %}-{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="empty-state">
+    No review events match your filters yet. Events are auto-enqueued when an
+    agent's <code>review_effort</code> level covers a reviewable action (see
+    <a href="{{ url_for('dashboard.agents_list') }}">Agents</a>).
+</p>
+{% endif %}
+{% endblock %}

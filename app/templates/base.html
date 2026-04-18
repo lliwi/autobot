@@ -24,6 +24,7 @@
                 <li><a href="{{ url_for('dashboard.packages_list') }}" class="{% if request.endpoint and ('package' in request.endpoint) %}active{% endif %}">Packages</a></li>
                 <li><a href="{{ url_for('dashboard.topology') }}" class="{% if request.endpoint == 'dashboard.topology' %}active{% endif %}">Topology</a></li>
                 <li><a href="{{ url_for('dashboard.patches_list') }}" class="{% if request.endpoint == 'dashboard.patches_list' or request.endpoint == 'dashboard.patch_detail' %}active{% endif %}">Patches</a></li>
+                <li><a href="{{ url_for('dashboard.review_activity') }}" class="{% if request.endpoint == 'dashboard.review_activity' %}active{% endif %}">Reviewer</a></li>
                 <li><a href="{{ url_for('dashboard.approval_rules_list') }}" class="{% if request.endpoint and 'approval_rule' in request.endpoint %}active{% endif %}">Approval Rules</a></li>
                 <li><a href="{{ url_for('dashboard.scheduler_list') }}" class="{% if request.endpoint and 'scheduler' in request.endpoint %}active{% endif %}">Scheduler</a></li>
                 <li><a href="{{ url_for('dashboard.metrics') }}" class="{% if request.endpoint == 'dashboard.metrics' %}active{% endif %}">Metrics</a></li>
