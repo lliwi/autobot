@@ -90,6 +90,22 @@ def overview():
     last_hb = _aware(db.session.query(func.max(HeartbeatEvent.tick_at)).scalar())
     seconds_ago = int((now - last_hb).total_seconds()) if last_hb else None
 
+    # Active tasks — runs currently running
+    active_runs_count = Run.query.filter(Run.status == "running").count()
+    busy_agent_ids = [
+        row[0] for row in db.session.query(Run.agent_id)
+        .filter(Run.status == "running")
+        .distinct()
+        .all()
+    ]
+    busy_agents = (
+        Agent.query.filter(Agent.id.in_(busy_agent_ids)).all() if busy_agent_ids else []
+    )
+    agents_working_count = len(busy_agents)
+    agents_working_names = ", ".join(a.name for a in busy_agents[:3])
+    if len(busy_agents) > 3:
+        agents_working_names += f", +{len(busy_agents) - 3}"
+
     # Activity bars — last 24 hourly buckets
     window_start = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=23)
     execs = ToolExecution.query.filter(
@@ -184,6 +200,9 @@ def overview():
         avg_latency_s=avg_latency_s,
         latency_delta_pct=latency_delta_pct,
         seconds_ago=seconds_ago,
+        active_runs_count=active_runs_count,
+        agents_working_count=agents_working_count,
+        agents_working_names=agents_working_names,
         # activity
         bars=bars,
         # events

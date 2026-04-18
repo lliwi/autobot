@@ -154,6 +154,11 @@ input:focus, textarea:focus, select:focus {
 .dot.blue  { background: var(--blue);  box-shadow: 0 0 0 2px var(--blue-bg); }
 .dot.amber { background: var(--amber); box-shadow: 0 0 0 2px oklch(0.78 0.14 75 / 0.15); }
 .dot.dim   { background: var(--fg-faint); box-shadow: none; }
+.dot.pulse { animation: dot-pulse 1.6s ease-in-out infinite; }
+@keyframes dot-pulse {
+    0%, 100% { box-shadow: 0 0 0 2px var(--blue-bg); }
+    50%      { box-shadow: 0 0 0 5px oklch(0.65 0.14 245 / 0.08); }
+}
 
 /* Legacy .sidebar-header (used by some templates) */
 .sidebar-header { display: none; }

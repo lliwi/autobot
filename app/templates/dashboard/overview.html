@@ -13,6 +13,16 @@
             {% else %}
                 no heartbeat yet
             {% endif %}
+            {% if agents_working_count > 0 %}
+                · <span class="dot blue pulse"></span>
+                <strong style="color: var(--blue); text-transform: uppercase; letter-spacing: 0.08em; font-size: 11px;">
+                    {{ agents_working_count }} agent{% if agents_working_count != 1 %}s{% endif %} working
+                </strong>
+                <span style="color: var(--fg-dim);">— {{ agents_working_names }} ({{ active_runs_count }} run{% if active_runs_count != 1 %}s{% endif %})</span>
+            {% else %}
+                · <span class="dot dim"></span>
+                <span style="color: var(--fg-dim); font-size: 12px;">idle — no active runs</span>
+            {% endif %}
         </div>
     </div>
 </div>
@@ -41,6 +51,9 @@
         </div>
         <div class="value">
             {{ agents_online }}<span class="unit">/{{ agents_total }}</span>
+            {% if agents_working_count > 0 %}
+            <span class="unit" style="color: var(--blue); margin-left: 4px;">· {{ agents_working_count }} working</span>
+            {% endif %}
         </div>
         <div class="sub">{{ agents_names }}</div>
     </div>
