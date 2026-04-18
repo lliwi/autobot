@@ -395,53 +395,77 @@ def _provision_default_agent(app, spec):
     return agent
 
 
+def _read_template(filename):
+    """Return the contents of ``workspaces/_template/<filename>`` or ``""`` if missing.
+
+    Onboarding layers user-provided data on top of the shared template so the
+    Spanish directives (Identidad de ejecución, Ética operativa, etc.) are
+    preserved instead of being clobbered by hand-crafted blocks.
+    """
+    from app.workspace.manager import _template_path
+    path = _template_path() / filename
+    try:
+        return path.read_text(encoding="utf-8")
+    except OSError:
+        return ""
+
+
+def _inject_after_first_heading(template_text, block):
+    """Insert ``block`` right after the first H1 line of ``template_text``."""
+    if not template_text:
+        return block
+    parts = template_text.split("\n", 1)
+    head = parts[0]
+    rest = parts[1] if len(parts) > 1 else ""
+    return head + "\n\n" + block.rstrip() + "\n" + rest
+
+
 def _render_soul(name, role, tone, priorities, limits, mission):
     priorities_block = "\n".join(f"- {p}" for p in priorities) or "- (none)"
     limits_block = "\n".join(f"- {p}" for p in limits) or "- (none)"
-    return f"""# Soul — {name}
-
-## Identity
-{role}
-
-## Mission
-{mission}
-
-## Tone & Style
-{tone}
-
-## Principles
-{priorities_block}
-
-## Limits
-{limits_block}
-"""
+    onboarding = (
+        f"## Onboarded identity — {name}\n"
+        f"- **Role:** {role}\n"
+        f"- **Mission:** {mission}\n"
+        f"- **Tone & style:** {tone}\n"
+        f"\n"
+        f"### Declared priorities\n"
+        f"{priorities_block}\n"
+        f"\n"
+        f"### Declared limits\n"
+        f"{limits_block}\n"
+    )
+    template = _read_template("SOUL.md") or "# Soul\n"
+    return _inject_after_first_heading(template, onboarding)
 
 
 def _render_agents_md(name, role, type_label="orchestrator", peers=None):
-    peers_block = ""
+    peers_lines = ""
     if peers:
-        peers_block = "\n## Peer agents\n" + "\n".join(
-            f"- **{peer_name}** (`{peer_slug}`) — {peer_role}" for peer_name, peer_slug, peer_role in peers
+        peers_lines = "\n**Peer agents:**\n" + "\n".join(
+            f"- {peer_name} (`{peer_slug}`) — {peer_role}"
+            for peer_name, peer_slug, peer_role in peers
         ) + "\n"
-    return f"""# Agents
-
-## {name} ({type_label})
-- **Role:** {role}
-- **Type:** root / {type_label}
-- **Sub-agents:** none yet
-{peers_block}
-Sub-agents will be appended below as they are created.
-"""
+    self_block = (
+        f"## Root agent: {name} ({type_label})\n"
+        f"- **Role:** {role}\n"
+        f"- **Type:** root / {type_label}\n"
+        f"- **Sub-agents:** none yet\n"
+        f"{peers_lines}"
+    )
+    template = _read_template("AGENTS.md") or "# Agents\n\nNo sub-agents configured yet.\n"
+    placeholder = "No sub-agents configured yet."
+    if placeholder in template:
+        return template.replace(placeholder, self_block.rstrip(), 1)
+    return _inject_after_first_heading(template, self_block)
 
 
 def _render_memory_md(initial_memory):
-    if initial_memory:
-        return f"""# Memory
-
-## Initial context
-- {initial_memory}
-"""
-    return """# Memory
-
-No memories recorded yet. Entries will be appended here as the agent learns.
-"""
+    template = _read_template("MEMORY.md") or "# Memory\n\nNo memories recorded yet.\n"
+    if not initial_memory:
+        return template
+    block = f"## Initial context\n- {initial_memory}"
+    placeholder = "No memories recorded yet."
+    if placeholder in template:
+        return template.replace(placeholder, block, 1)
+    return _inject_after_first_heading(template, block)

@@ -69,6 +69,7 @@ def update_agent(agent, data):
             agent.review_token_budget_daily = budget or None
     if "parent_agent_id" in data:
         raw = data["parent_agent_id"]
+        old_parent_id = agent.parent_agent_id
         if raw in (None, "", "none", "null"):
             agent.parent_agent_id = None
         else:
@@ -83,8 +84,28 @@ def update_agent(agent, data):
             if db.session.get(Agent, new_parent_id) is None:
                 raise ValueError("Parent agent not found")
             agent.parent_agent_id = new_parent_id
+        if agent.parent_agent_id != old_parent_id:
+            _sync_agents_md_on_reparent(agent, old_parent_id)
     db.session.commit()
     return agent
+
+
+def _sync_agents_md_on_reparent(agent, old_parent_id):
+    """Keep parent AGENTS.md docs consistent when an agent's parent changes.
+
+    Appends an entry to the new parent's file; the live runtime roster is
+    built from the DB, so a missing de-register from the old parent is just
+    cosmetic — logged but non-fatal.
+    """
+    from app.services.subagent_service import _register_in_agents_md
+
+    if agent.parent_agent_id:
+        new_parent = db.session.get(Agent, agent.parent_agent_id)
+        if new_parent is not None:
+            try:
+                _register_in_agents_md(new_parent, agent, role="")
+            except Exception:
+                pass
 
 
 def _descendant_ids(agent):

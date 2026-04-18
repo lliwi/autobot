@@ -74,6 +74,10 @@ def build_context(agent, session, user_message):
         system_parts.append(f"## Available Tools\n{tools_doc}")
     if agents_doc:
         system_parts.append(f"## Agent Network\n{agents_doc}")
+
+    live_roster = _render_live_agent_roster(agent)
+    if live_roster:
+        system_parts.append(live_roster)
     if memory:
         system_parts.append(f"## Memory\n{memory}")
     if packages:
@@ -114,6 +118,36 @@ def build_context(agent, session, user_message):
     messages.append({"role": "user", "content": user_message})
 
     return messages
+
+
+def _render_live_agent_roster(agent) -> str:
+    """Live list of sub-agents available for delegation, built from the DB.
+
+    Overrides any stale entry in ``AGENTS.md``: the file is edited by humans
+    and by `_register_in_agents_md`, so parent changes made via the admin
+    "edit agent" screen never propagated. The runtime needs the real roster.
+    """
+    from app.models.agent import Agent
+
+    children = (
+        Agent.query
+        .filter_by(parent_agent_id=agent.id, status="active")
+        .order_by(Agent.name)
+        .all()
+    )
+    if not children:
+        return ""
+
+    lines = [
+        "## Active sub-agents (live from DB — authoritative)",
+        "",
+        "You may delegate to any of these using"
+        " `delegate_task` with `target_name` set to the slug or name.",
+        "",
+    ]
+    for c in children:
+        lines.append(f"- **{c.name}** (slug `{c.slug}`, model `{c.model_name or '?'}`)")
+    return "\n".join(lines)
 
 
 def _render_pending_items(agent) -> str:
