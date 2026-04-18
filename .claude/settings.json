@@ -46,7 +46,9 @@
       "mcp__chrome-devtools__evaluate_script",
       "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" \"http://localhost:5000/metrics\")",
       "Bash(curl -s -o /dev/null -w \"API HTTP %{http_code}\\\\n\" \"http://localhost:5000/api/metrics/codex-quota\")",
-      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5000/profile)"
+      "Bash(curl -s -o /dev/null -w \"%{http_code}\\\\n\" http://localhost:5000/profile)",
+      "WebFetch(domain:api.anthropic.com)",
+      "Bash(tar -xf /tmp/autobot-design.tar -C /tmp/autobot-design)"
     ],
     "additionalDirectories": [
       "/tmp"
