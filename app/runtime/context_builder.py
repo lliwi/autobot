@@ -30,8 +30,8 @@ Built-in tool cheatsheet (always call with JSON objects like these):
 - `delegate_task` — `{"target_name": "reviewer", "message": "review the patch #42"}`.
 - `schedule_task` — `{"schedule_expr": "0 18 * * *", "message": "...prompt to run..."}`. Use when the user asks for a recurring/daily/weekly task. 5-field cron, UTC.
 - `list_scheduled_tasks` / `cancel_scheduled_task` — manage this agent's scheduled tasks (`cancel_scheduled_task` needs `{"task_id": N}`).
-- `get_credential` — `{"name": "github_token"}`. Returns `{type: "token", value}` or `{type: "user_password", username, password}` (agent-scoped first, then global). Treat values as sensitive: never echo them to the user or write them to workspace files.
-- `list_credentials` — no args. Returns names, types, descriptions (and usernames for user_password entries) — no secret values.
+- `get_credential` — `{"name": "github_token"}`. Returns `{type: "token", value, source}` or `{type: "user_password", username, password, source}`. Lookup order: agent-scoped DB → global DB → `AUTOBOT_CRED_<UPPER(name)>` environment variable (token-only). Treat values as sensitive: never echo them to the user or write them to workspace files.
+- `list_credentials` — no args. Returns names, types, descriptions, and `source: "db"|"env"` — no secret values. Credentials sourced from `.env` appear with `scope: "env"`.
 - `set_credential` — `{"name": "...", "value": "...", "description": "..."}` for a single-value token, or `{"name": "...", "credential_type": "user_password", "username": "...", "value": "<password>"}` for a user+password pair. Always agent-scoped.
 - `delete_credential` — `{"name": "..."}`. Removes an agent-scoped credential.
 - `get_current_time` — no args. Returns ISO-8601 UTC.
@@ -88,6 +88,12 @@ def build_context(agent, session, user_message):
         if skill_md:
             system_parts.append(f"## Skill: {skill.name}\n{skill_md}")
 
+    # Pending items (patches + packages) so the agent sees what's already in
+    # the review queue and doesn't re-propose an identical change every turn.
+    pending_section = _render_pending_items(agent)
+    if pending_section:
+        system_parts.append(pending_section)
+
     messages = []
 
     if system_parts:
@@ -108,3 +114,49 @@ def build_context(agent, session, user_message):
     messages.append({"role": "user", "content": user_message})
 
     return messages
+
+
+def _render_pending_items(agent) -> str:
+    """Return a short Markdown list of this agent's pending review items.
+
+    Empty string when there's nothing pending, so the section only shows up
+    when the agent actually needs to reason about queued work.
+    """
+    from app.models.patch_proposal import PatchProposal
+    from app.models.package_installation import PackageInstallation
+
+    patches = (
+        PatchProposal.query
+        .filter_by(agent_id=agent.id, status="pending_review")
+        .order_by(PatchProposal.id.desc())
+        .limit(10)
+        .all()
+    )
+    packages = (
+        PackageInstallation.query
+        .filter_by(agent_id=agent.id, status="pending_review")
+        .order_by(PackageInstallation.id.desc())
+        .limit(10)
+        .all()
+    )
+    if not patches and not packages:
+        return ""
+
+    lines = [
+        "## Pending review",
+        "",
+        "These items are already queued. Do **not** re-propose identical"
+        " changes — mention them to the user or wait for approval instead.",
+        "",
+    ]
+    if patches:
+        lines.append("Patches:")
+        for p in patches:
+            lines.append(f"- patch #{p.id} · L{p.security_level} · `{p.target_path}` — {p.title}")
+        lines.append("")
+    if packages:
+        lines.append("Package installs:")
+        for pk in packages:
+            lines.append(f"- package #{pk.id} · `{pk.name}` (spec `{pk.spec}`)")
+        lines.append("")
+    return "\n".join(lines)

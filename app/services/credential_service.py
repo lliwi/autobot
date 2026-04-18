@@ -4,14 +4,28 @@ Values are encrypted at rest with Fernet using ``TOKEN_ENCRYPTION_KEY``. The
 clear value only appears when an admin explicitly reveals it in the UI, or when
 an agent calls the ``get_credential`` tool. List/preview views always show a
 redacted value so secrets never leak into templates, logs, or context windows.
+
+Environment fallback: when a name isn't in the DB, we look for an environment
+variable of the form ``AUTOBOT_CRED_<UPPERCASED_NAME>``. This is an explicit,
+opt-in escape hatch for admins who want to provision shared credentials via
+``.env`` without having to insert rows manually. Arbitrary env vars are NOT
+exposed — the prefix is mandatory so things like ``DATABASE_URL`` or
+``TOKEN_ENCRYPTION_KEY`` can't be read by an agent.
 """
 from __future__ import annotations
+
+import os
+import re
 
 from flask import current_app
 
 from app.extensions import db
 from app.models.agent import Agent
 from app.models.credential import Credential
+
+
+_ENV_PREFIX = "AUTOBOT_CRED_"
+_ENV_NAME_RE = re.compile(r"^[A-Za-z0-9_]+$")
 
 
 class CredentialError(Exception):
@@ -80,36 +94,61 @@ def _resolve_row(name: str, agent_id: int | None) -> Credential | None:
     return Credential.query.filter_by(agent_id=None, name=name).first()
 
 
+def _env_lookup(name: str) -> str | None:
+    """Return the value of ``AUTOBOT_CRED_<UPPER(name)>`` if set, else None.
+
+    The name must be alphanumeric/underscore — anything else is rejected so a
+    malformed lookup can't reach ``os.environ`` via an injection-like path.
+    """
+    if not name or not _ENV_NAME_RE.match(name):
+        return None
+    candidate = _ENV_PREFIX + name.upper()
+    val = os.environ.get(candidate)
+    if val is None or val == "":
+        return None
+    return val
+
+
 def get_credential_value(name: str, agent_id: int | None = None) -> str | None:
     """Resolve a token credential by ``name``. Agent-scoped wins over global.
 
-    Returns ``None`` if not found. For ``user_password`` credentials use
-    ``get_credential_pair`` instead — this function returns just the decrypted
-    value string.
+    Falls back to the ``AUTOBOT_CRED_<UPPER(name)>`` environment variable when
+    the DB lookup misses, so admins can pre-seed shared secrets via ``.env``.
+    Returns ``None`` if neither source has it. For ``user_password`` credentials
+    use ``get_credential_pair`` instead — this function returns just the
+    decrypted value string.
     """
     row = _resolve_row(name, agent_id)
-    if row is None:
-        return None
-    return _decrypt(row.encrypted_value)
+    if row is not None:
+        return _decrypt(row.encrypted_value)
+    return _env_lookup(name)
 
 
 def get_credential_pair(name: str, agent_id: int | None = None) -> dict | None:
     """Resolve a credential and return its full shape.
 
     Works for both types. Shape:
-      * token          → {"type": "token", "value": "..."}
-      * user_password  → {"type": "user_password", "username": "...", "password": "..."}
+      * token          → {"type": "token", "value": "...", "source": "db"|"env"}
+      * user_password  → {"type": "user_password", "username": "...", "password": "...", "source": "db"}
+
+    When the DB has no match, falls back to ``AUTOBOT_CRED_<UPPER(name)>`` as a
+    token-type credential (env vars can't carry username + password separately).
     """
     row = _resolve_row(name, agent_id)
-    if row is None:
-        return None
-    if row.credential_type == "user_password":
-        return {
-            "type": "user_password",
-            "username": row.username or "",
-            "password": _decrypt(row.encrypted_value),
-        }
-    return {"type": "token", "value": _decrypt(row.encrypted_value)}
+    if row is not None:
+        if row.credential_type == "user_password":
+            return {
+                "type": "user_password",
+                "username": row.username or "",
+                "password": _decrypt(row.encrypted_value),
+                "source": "db",
+            }
+        return {"type": "token", "value": _decrypt(row.encrypted_value), "source": "db"}
+
+    env_value = _env_lookup(name)
+    if env_value is not None:
+        return {"type": "token", "value": env_value, "source": "env"}
+    return None
 
 
 def set_credential(name: str, value: str, description: str | None = None,

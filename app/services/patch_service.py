@@ -80,6 +80,41 @@ def propose_change(agent_id, target_path, new_content, title, reason, run_id=Non
     current_content = read_file(agent, target_path)
     diff = _compute_diff(target_path, current_content, new_content)
 
+    # Noop: proposed content is identical to what's already there.
+    if diff == "" and not is_new:
+        patch = PatchProposal(
+            agent_id=agent_id,
+            run_id=run_id,
+            title=title,
+            reason=reason,
+            diff_text="",
+            target_path=target_path,
+            target_type=target_type,
+            security_level=level,
+            status="rejected",
+            test_result_json={"error": "No-op: proposed content is identical to current file"},
+        )
+        db.session.add(patch)
+        db.session.commit()
+        return patch
+
+    # Dedup: if there's already a pending_review patch for the same target with
+    # the same diff, return it instead of queueing a duplicate. Prevents the
+    # "re-propose identical change" loop we saw in Matrix history.
+    existing_pending = (
+        PatchProposal.query
+        .filter_by(agent_id=agent_id, target_path=target_path, status="pending_review")
+        .order_by(PatchProposal.id.desc())
+        .all()
+    )
+    for candidate in existing_pending:
+        if (candidate.diff_text or "") == diff:
+            logger.info(
+                "propose_change dedup: returning existing pending patch %s for %s",
+                candidate.id, target_path,
+            )
+            return candidate
+
     # Take snapshot
     snapshot_path = _take_snapshot(workspace, target_path)
 
@@ -110,7 +145,8 @@ def propose_change(agent_id, target_path, new_content, title, reason, run_id=Non
         return patch
 
     # Level 2: honour standing approval rules the user has set for this
-    # agent + target. If a rule matches, auto-apply; otherwise stay pending.
+    # agent + target. If a rule matches, auto-apply; otherwise fall through to
+    # reviewer sub-agent vote.
     if level == 2:
         from app.services.approval_rule_service import matches_rule
 
@@ -130,6 +166,46 @@ def propose_change(agent_id, target_path, new_content, title, reason, run_id=Non
                 "Patch %s auto-approved by standing rule %s: %s",
                 patch.id, rule.id, target_path,
             )
+            return patch
+
+        # No standing rule — ask the reviewer sub-agent. Its verdict can
+        # auto-apply (APPROVE) or leave the patch pending with the reviewer's
+        # notes attached (REJECT or no reviewer configured).
+        from app.services.review_service import review_patch
+
+        review = review_patch(
+            agent=agent,
+            target_path=target_path,
+            diff_text=diff,
+            new_content=new_content,
+            reason=reason,
+            run_id=run_id,
+        )
+        if review is not None:
+            patch.test_result_json = {
+                "reviewer": {
+                    "slug": review.get("reviewer"),
+                    "approve": review.get("approve"),
+                    "summary": review.get("summary"),
+                    "run_id": review.get("run_id"),
+                    "error": review.get("error"),
+                }
+            }
+            if review.get("approve"):
+                patch.status = "approved"
+                db.session.commit()
+                _apply_patch(patch, agent, new_content)
+                logger.info(
+                    "Patch %s auto-approved by reviewer %s: %s",
+                    patch.id, review.get("reviewer"), target_path,
+                )
+            else:
+                db.session.commit()
+                logger.info(
+                    "Patch %s left pending after reviewer %s verdict: %s",
+                    patch.id, review.get("reviewer"),
+                    (review.get("summary") or "")[:80],
+                )
 
     return patch
 

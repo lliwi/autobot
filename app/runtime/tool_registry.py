@@ -634,6 +634,12 @@ def _create_tool(_agent=None, _run_id=None, slug=None, description=None,
     except ValueError as e:
         return {"error": str(e), "created": outputs}
 
+    from app.workspace.discovery import sync_tools_to_db
+    sync_tools_to_db(_agent)
+
+    from app.workspace.manager import refresh_tools_md
+    refresh_tools_md(_agent)
+
     from app.services.review_service import review_creation
     import json as _json
     review_payload = (
@@ -643,7 +649,7 @@ def _create_tool(_agent=None, _run_id=None, slug=None, description=None,
     )
     review = review_creation(_agent, "tool", slug, review_payload, run_id=_run_id)
 
-    result = {"slug": slug, "created": outputs, "message": "Tool scaffold written."}
+    result = {"slug": slug, "created": outputs, "message": "Tool scaffold written, indexed, and available for calling."}
     if review is not None:
         result["review"] = review
     return result
@@ -797,24 +803,44 @@ def _get_credential(_agent=None, name=None, **kwargs):
 def _list_credentials(_agent=None, **kwargs):
     if _agent is None:
         return {"error": "No agent context"}
-    from app.services.credential_service import CredentialError, list_credentials
+    import os
+    from app.services.credential_service import (
+        CredentialError,
+        list_credentials,
+        _ENV_PREFIX,
+    )
 
     try:
         rows = list_credentials(agent_id=_agent.id)
     except CredentialError as e:
         return {"error": str(e)}
-    return {
-        "credentials": [
-            {
-                "name": r.name,
-                "description": r.description,
-                "type": r.credential_type,
-                "username": r.username if r.credential_type == "user_password" else None,
-                "scope": "agent" if r.agent_id == _agent.id else "global",
-            }
-            for r in rows
-        ]
-    }
+    items = [
+        {
+            "name": r.name,
+            "description": r.description,
+            "type": r.credential_type,
+            "username": r.username if r.credential_type == "user_password" else None,
+            "scope": "agent" if r.agent_id == _agent.id else "global",
+            "source": "db",
+        }
+        for r in rows
+    ]
+    seen_db_names = {r.name for r in rows}
+    for env_key, env_val in os.environ.items():
+        if not env_key.startswith(_ENV_PREFIX) or not env_val:
+            continue
+        name = env_key[len(_ENV_PREFIX):].lower()
+        if not name or name in seen_db_names:
+            continue
+        items.append({
+            "name": name,
+            "description": f"Provided via .env (var {env_key})",
+            "type": "token",
+            "username": None,
+            "scope": "env",
+            "source": "env",
+        })
+    return {"credentials": items}
 
 
 def _set_credential(_agent=None, name=None, value=None, description=None,

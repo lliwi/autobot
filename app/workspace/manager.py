@@ -70,3 +70,50 @@ def list_files(agent):
     if not workspace.exists():
         return []
     return [str(p.relative_to(workspace)) for p in workspace.rglob("*") if p.is_file()]
+
+
+def refresh_tools_md(agent):
+    """Rewrite ``<workspace>/TOOLS.md`` with builtins + workspace tools.
+
+    The file feeds into the system prompt. Keeping it in sync with what the
+    agent can actually call prevents the "I don't have that tool" loop when
+    a freshly-created workspace tool is already available to the runtime.
+    """
+    import logging
+    from app.runtime.tool_registry import _registry
+    from app.workspace.discovery import discover_workspace_tools
+
+    logger = logging.getLogger(__name__)
+    try:
+        builtins = sorted(_registry.values(), key=lambda t: t.name)
+        workspace_tools = discover_workspace_tools(agent)
+
+        lines = ["# Tools", ""]
+        lines.append("## Built-in Tools")
+        lines.append("")
+        for td in builtins:
+            lines.append(f"- **{td.name}** — {td.description}")
+
+        lines.append("")
+        lines.append("## Workspace Tools")
+        lines.append("")
+        if not workspace_tools:
+            lines.append("_None yet — create one with `create_tool`._")
+        else:
+            for wt in workspace_tools:
+                params = wt.get("parameters", {}).get("properties", {}) or {}
+                required = set(wt.get("parameters", {}).get("required", []) or [])
+                param_bits = []
+                for pname, pspec in params.items():
+                    ptype = pspec.get("type", "any")
+                    marker = "req" if pname in required else "opt"
+                    param_bits.append(f"`{pname}` ({ptype}, {marker})")
+                params_line = ", ".join(param_bits) if param_bits else "no arguments"
+                lines.append(f"- **{wt['name']}** — {wt.get('description', '').strip()}")
+                lines.append(f"  Parameters: {params_line}")
+
+        content = "\n".join(lines) + "\n"
+        path = get_workspace_path(agent) / "TOOLS.md"
+        path.write_text(content, encoding="utf-8")
+    except Exception as e:
+        logger.warning("Failed to refresh TOOLS.md for agent %s: %s", agent.slug, e)
