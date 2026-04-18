@@ -11,6 +11,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     let sessionId = null;
     let streaming = false;
+    let currentAgentName = '';
 
     function applyHideTool() {
         messagesDiv.classList.toggle('hide-tool', hideToolToggle.checked);
@@ -46,10 +47,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function renderPersistedMessage(m) {
         if (m.role === 'user' || m.role === 'assistant') {
-            appendMessage(m.role, m.content);
+            appendMessage(m.role, m.content, labelFor(m.role));
         } else if (m.role === 'tool' || m.role === 'system') {
             appendMessage('tool', m.content);
         }
+    }
+
+    function labelFor(role) {
+        if (role === 'assistant') return currentAgentName || 'assistant';
+        return role;
     }
 
     async function onAgentChange() {
@@ -57,6 +63,9 @@ document.addEventListener('DOMContentLoaded', () => {
         const enabled = agentId !== '';
         messageInput.disabled = !enabled;
         sendBtn.disabled = !enabled;
+        currentAgentName = enabled
+            ? (agentSelect.options[agentSelect.selectedIndex].text || '').trim()
+            : '';
         if (enabled) {
             localStorage.setItem(LAST_AGENT_KEY, agentId);
             await loadHistory(agentId);
@@ -93,7 +102,7 @@ document.addEventListener('DOMContentLoaded', () => {
         sendBtn.disabled = true;
         messageInput.disabled = true;
 
-        const assistantDiv = appendMessage('assistant', '');
+        const assistantDiv = appendMessage('assistant', '', labelFor('assistant'));
         const contentSpan = assistantDiv.querySelector('.chat-msg-content');
 
         try {
@@ -185,11 +194,12 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function appendMessage(role, content) {
+    function appendMessage(role, content, label) {
         const div = document.createElement('div');
         div.className = `chat-msg chat-msg-${role}`;
+        const displayLabel = label || role;
         div.innerHTML = `
-            <div class="chat-msg-role">${role}</div>
+            <div class="chat-msg-role">${escapeHtml(displayLabel)}</div>
             <div class="chat-msg-content">${escapeHtml(content)}</div>
         `;
         messagesDiv.appendChild(div);
