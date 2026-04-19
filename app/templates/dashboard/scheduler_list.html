@@ -35,6 +35,7 @@
             <td>{{ task.next_run_at | localtz }}</td>
             <td>{{ task.retry_count }}/{{ task.max_retries }}</td>
             <td>
+                <a href="{{ url_for('dashboard.scheduler_edit', task_id=task.id) }}" class="btn btn-sm">Edit</a>
                 <form method="POST" action="{{ url_for('dashboard.scheduler_toggle', task_id=task.id) }}" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-sm">{{ 'Disable' if task.enabled else 'Enable' }}</button>

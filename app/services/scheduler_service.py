@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from croniter import croniter
 
@@ -17,7 +18,7 @@ def create_task(agent_id, task_type, schedule_expr=None, timezone_str="UTC", pay
         max_retries=max_retries,
     )
     if schedule_expr and task_type == "cron":
-        task.next_run_at = compute_next_run(schedule_expr)
+        task.next_run_at = compute_next_run(schedule_expr, tz_name=timezone_str)
     db.session.add(task)
     db.session.commit()
     return task
@@ -30,8 +31,8 @@ def update_task(task_id, **kwargs):
     for key, value in kwargs.items():
         if hasattr(task, key):
             setattr(task, key, value)
-    if "schedule_expr" in kwargs and task.task_type == "cron":
-        task.next_run_at = compute_next_run(task.schedule_expr)
+    if ("schedule_expr" in kwargs or "timezone" in kwargs) and task.task_type == "cron":
+        task.next_run_at = compute_next_run(task.schedule_expr, tz_name=task.timezone)
     db.session.commit()
     return task
 
@@ -42,7 +43,7 @@ def toggle_task(task_id):
         return None
     task.enabled = not task.enabled
     if task.enabled and task.schedule_expr and task.task_type == "cron":
-        task.next_run_at = compute_next_run(task.schedule_expr)
+        task.next_run_at = compute_next_run(task.schedule_expr, tz_name=task.timezone)
     db.session.commit()
     return task
 
@@ -74,7 +75,7 @@ def mark_task_executed(task_id):
     task.last_run_at = datetime.now(timezone.utc)
     task.retry_count = 0
     if task.schedule_expr and task.task_type == "cron":
-        task.next_run_at = compute_next_run(task.schedule_expr)
+        task.next_run_at = compute_next_run(task.schedule_expr, tz_name=task.timezone)
     elif task.task_type == "one_shot":
         task.enabled = False
         task.next_run_at = None
@@ -93,11 +94,31 @@ def mark_task_failed(task_id):
     return task
 
 
-def compute_next_run(schedule_expr, base_time=None):
+def compute_next_run(schedule_expr, base_time=None, tz_name=None):
+    """Return the next cron fire time as a tz-aware UTC datetime.
+
+    The cron expression is interpreted in ``tz_name`` (falls back to UTC) so
+    "0 18 * * *" with Europe/Madrid fires at 18:00 local, not 18:00 UTC. The
+    return value is normalized to UTC because the DB column is naive and we
+    want the stored wall-clock to be UTC.
+    """
+    tz = timezone.utc
+    if tz_name:
+        try:
+            tz = ZoneInfo(tz_name)
+        except ZoneInfoNotFoundError:
+            tz = timezone.utc
+
     if base_time is None:
-        base_time = datetime.now(timezone.utc)
+        base_time = datetime.now(tz)
+    elif base_time.tzinfo is None:
+        base_time = base_time.replace(tzinfo=timezone.utc).astimezone(tz)
+    else:
+        base_time = base_time.astimezone(tz)
+
     try:
         cron = croniter(schedule_expr, base_time)
-        return cron.get_next(datetime)
+        nxt = cron.get_next(datetime)
+        return nxt.astimezone(timezone.utc)
     except (ValueError, KeyError):
         return None

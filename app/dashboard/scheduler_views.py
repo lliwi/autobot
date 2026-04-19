@@ -10,6 +10,7 @@ from app.services.scheduler_service import (
     get_task,
     list_tasks,
     toggle_task,
+    update_task,
 )
 
 
@@ -37,6 +38,33 @@ def scheduler_create():
 
     agents = Agent.query.order_by(Agent.name).all()
     return render_template("dashboard/scheduler_create.html", agents=agents)
+
+
+@dashboard_bp.route("/scheduler/<int:task_id>/edit", methods=["GET", "POST"])
+@login_required
+def scheduler_edit(task_id):
+    task = get_task(task_id)
+    if task is None:
+        flash("Task not found.", "danger")
+        return redirect(url_for("dashboard.scheduler_list"))
+
+    if request.method == "POST":
+        payload_message = request.form.get("payload_message", "").strip()
+        payload = {"message": payload_message} if payload_message else None
+        update_task(
+            task_id,
+            agent_id=int(request.form["agent_id"]),
+            task_type=request.form["task_type"],
+            schedule_expr=request.form.get("schedule_expr") or None,
+            timezone=request.form.get("timezone", "UTC"),
+            payload_json=payload,
+            max_retries=int(request.form.get("max_retries", 3)),
+        )
+        flash("Scheduled task updated.", "success")
+        return redirect(url_for("dashboard.scheduler_list"))
+
+    agents = Agent.query.order_by(Agent.name).all()
+    return render_template("dashboard/scheduler_edit.html", task=task, agents=agents)
 
 
 @dashboard_bp.route("/scheduler/<int:task_id>/toggle", methods=["POST"])

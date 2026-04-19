@@ -1,4 +1,5 @@
 import logging
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
@@ -52,6 +53,9 @@ def shutdown_scheduler():
 def _sync_jobs(app):
     """Sync APScheduler jobs from database state."""
     with app.app_context():
+        from datetime import timezone as _tz
+
+        from app.extensions import db
         from app.models.agent import Agent
         from app.models.scheduled_task import ScheduledTask
 
@@ -79,13 +83,30 @@ def _sync_jobs(app):
                 job_id = f"cron_{task.id}"
                 cron_job_ids.add(job_id)
                 try:
-                    trigger = CronTrigger.from_crontab(task.schedule_expr)
+                    tz = None
+                    if task.timezone:
+                        try:
+                            tz = ZoneInfo(task.timezone)
+                        except ZoneInfoNotFoundError:
+                            logger.warning(
+                                "Unknown timezone %r for task %s; falling back to UTC",
+                                task.timezone, task.id,
+                            )
+                    trigger = CronTrigger.from_crontab(task.schedule_expr, timezone=tz)
                     _ensure_job(
                         job_id=job_id,
                         func=_execute_cron_task,
                         trigger=trigger,
                         kwargs={"app": app, "task_id": task.id},
                     )
+                    # Keep DB next_run_at aligned with APScheduler's computed
+                    # next fire time (which respects the task's timezone).
+                    job = _scheduler.get_job(job_id)
+                    if job and job.next_run_time:
+                        new_next = job.next_run_time.astimezone(_tz.utc).replace(tzinfo=None)
+                        if task.next_run_at != new_next:
+                            task.next_run_at = new_next
+                            db.session.commit()
                 except ValueError as e:
                     logger.error(f"Invalid cron expression for task {task.id}: {e}")
 
