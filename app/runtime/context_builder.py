@@ -7,12 +7,10 @@ from app.runtime.context_budget import (
     trim_history_to_budget,
 )
 from app.workspace.loader import (
-    load_agents,
     load_memory,
     load_packages,
     load_security_baseline,
     load_soul,
-    load_tools,
 )
 
 # DB-side safety net: never pull more than this many rows per turn regardless
@@ -46,7 +44,7 @@ Hard rules:
 
 Built-in tool cheatsheet (always call with JSON objects like these):
 - `list_workspace_files` — no args. Use once at the start if you need to discover files.
-- `read_workspace_file` — `{"filename": "SOUL.md"}`. filename must already exist in the workspace.
+- `read_workspace_file` — `{"filename": "SOUL.md"}`. filename must already exist in the workspace. **Reference docs like `TOOLS.md`, `AGENTS.md`, and per-skill `SKILL.md` files are NOT pre-loaded into your prompt** — they're listed in the "Workspace index" section. Call this tool to read them only when the current task actually needs those details. Second reads of the same file in the same turn return a cached stub; re-use the content you already saw instead of calling again.
 - `fetch_url` — `{"url": "https://example.com"}`. Absolute http(s) URL required.
 - `propose_change` — `{"target_path": "MEMORY.md", "new_content": "...full content...", "title": "Update memory", "reason": "why"}`. All four fields required. Use for single-file edits.
 - `create_skill` — `{"slug": "weather-bcn", "title": "Weather Barcelona", "summary": "...", "instructions": "...markdown...", "code": "def handler(...): ..."}`. Preferred over two propose_change calls when creating a skill.
@@ -81,26 +79,25 @@ def build_context(agent, session, user_message):
     user turn is always preserved, and chat history is packed newest-first
     until the token budget is reached. See ``context_budget`` for the rules.
     """
-    # System prompt from workspace files
+    # System prompt from workspace files. Small, behavior-critical docs are
+    # inlined; large reference docs (TOOLS.md, AGENTS.md, per-skill SKILL.md)
+    # are replaced by a manifest so the agent reads them via
+    # ``read_workspace_file`` only when it actually needs them. Typical saving
+    # is ~3-4K tokens/turn.
     security = load_security_baseline()
     soul = load_soul(agent)
-    tools_doc = load_tools(agent)
-    agents_doc = load_agents(agent)
     memory = load_memory(agent)
     packages = load_packages(agent)
 
-    # Security baseline goes first so downstream instructions can't override it
-    # by sheer prompt-order. TOOL_PROTOCOL follows with the operational rules.
+    # Security baseline goes first so downstream instructions can't override
+    # it by sheer prompt-order. TOOL_PROTOCOL follows with the operational
+    # rules.
     system_parts = []
     if security:
         system_parts.append(f"# Platform security baseline (non-negotiable)\n{security}")
     system_parts.append(TOOL_PROTOCOL)
     if soul:
         system_parts.append(f"## Identity and Principles\n{soul}")
-    if tools_doc:
-        system_parts.append(f"## Available Tools\n{tools_doc}")
-    if agents_doc:
-        system_parts.append(f"## Agent Network\n{agents_doc}")
 
     live_roster = _render_live_agent_roster(agent)
     if live_roster:
@@ -110,14 +107,12 @@ def build_context(agent, session, user_message):
     if packages:
         system_parts.append(f"## Workspace Packages\n{packages}")
 
-    # Inject enabled skill descriptions into system prompt
-    from app.workspace.discovery import get_enabled_skills
-    from app.workspace.manager import read_file
-
-    for skill in get_enabled_skills(agent):
-        skill_md = read_file(agent, f"{skill.path}/SKILL.md")
-        if skill_md:
-            system_parts.append(f"## Skill: {skill.name}\n{skill_md}")
+    # Lazy-load manifest for heavy reference docs. The agent calls
+    # ``read_workspace_file`` against the exact paths listed here when it
+    # needs the details.
+    manifest = _render_workspace_manifest(agent)
+    if manifest:
+        system_parts.append(manifest)
 
     # Pending items (patches + packages) so the agent sees what's already in
     # the review queue and doesn't re-propose an identical change every turn.
@@ -193,6 +188,49 @@ def estimate_context_tokens(agent, session, user_message) -> dict:
         "headroom": budget - total,
         "message_count": len(messages),
     }
+
+
+def _render_workspace_manifest(agent) -> str:
+    """List reference docs the agent can read on demand.
+
+    Replaces inlining of ``TOOLS.md``, ``AGENTS.md`` and every enabled
+    skill's ``SKILL.md`` body in the system prompt. Each entry gives the
+    exact path plus a one-line description so the model knows what it can
+    fetch without having to guess filenames.
+    """
+    from app.workspace.discovery import get_enabled_skills
+    from app.workspace.manager import list_files
+
+    available = set(list_files(agent) or [])
+
+    entries: list[tuple[str, str]] = []
+
+    if "TOOLS.md" in available:
+        entries.append(("TOOLS.md", "Workspace tool inventory and usage notes."))
+    if "AGENTS.md" in available:
+        entries.append(("AGENTS.md",
+                        "Sub-agent catalog with full descriptions (live roster above is authoritative)."))
+
+    for skill in get_enabled_skills(agent):
+        path = f"{skill.path}/SKILL.md"
+        desc = (skill.description or "").strip() or f"Skill: {skill.name}"
+        desc = desc.splitlines()[0][:140]
+        entries.append((path, desc))
+
+    if not entries:
+        return ""
+
+    lines = [
+        "## Workspace index (read on demand)",
+        "",
+        "Reference docs and skill details are NOT pre-loaded to save tokens."
+        " Call `read_workspace_file` with the exact path below only when the"
+        " current task needs that content:",
+        "",
+    ]
+    for path, desc in entries:
+        lines.append(f"- `{path}` — {desc}")
+    return "\n".join(lines)
 
 
 def _render_live_agent_roster(agent) -> str:

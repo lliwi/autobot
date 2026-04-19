@@ -45,7 +45,13 @@ def register_builtin_tools():
     register(
         ToolDefinition(
             name="read_workspace_file",
-            description="Read a file from the agent's workspace.",
+            description=(
+                "Read a file from the agent's workspace. Path is relative to the workspace root. "
+                "Reference docs (TOOLS.md, AGENTS.md, skills/<slug>/SKILL.md) are NOT pre-loaded "
+                "into context — use this tool to fetch them when the current task needs them. "
+                "The same file is cached per-run: re-reading it in the same turn returns a stub "
+                "so you don't pay the tokens twice."
+            ),
             parameters={
                 "type": "object",
                 "properties": {
@@ -428,7 +434,21 @@ def register_builtin_tools():
     )
 
 
-def _read_workspace_file(_agent=None, filename=None, path=None, file=None, name=None, **kwargs):
+# Per-run cache of files already served by ``read_workspace_file``. Lets us
+# return a cheap stub on the second read within the same turn instead of
+# re-serializing the file into the model's context. Entries live for the run
+# and are cleaned up by ``forget_run_reads`` at the end.
+_RUN_READ_CACHE: dict[int, set[str]] = {}
+
+
+def forget_run_reads(run_id: int | None) -> None:
+    """Drop the per-run read cache once a run completes."""
+    if run_id is None:
+        return
+    _RUN_READ_CACHE.pop(run_id, None)
+
+
+def _read_workspace_file(_agent=None, _run_id=None, filename=None, path=None, file=None, name=None, **kwargs):
     if _agent is None:
         return {"error": "No agent context"}
     # Accept common aliases the model might emit.
@@ -449,6 +469,23 @@ def _read_workspace_file(_agent=None, filename=None, path=None, file=None, name=
             "error": f"File '{filename}' not found in workspace.",
             "available_files": available,
         }
+
+    # Dedup within the same run: the model already has the content in its
+    # context from the earlier read, so returning it again is pure waste.
+    if _run_id is not None:
+        seen = _RUN_READ_CACHE.setdefault(_run_id, set())
+        if filename in seen:
+            return {
+                "filename": filename,
+                "cached": True,
+                "note": (
+                    "Already read earlier in this run — the full content is"
+                    " in your context above. Do not re-request unless the"
+                    " file may have changed (you proposed a patch to it)."
+                ),
+            }
+        seen.add(filename)
+
     return {"filename": filename, "content": read_file(_agent, filename)}
 
 
