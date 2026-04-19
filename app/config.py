@@ -25,6 +25,13 @@ class Config:
     # Agent defaults
     OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.2")
     MAX_CONTEXT_TOKENS = int(os.environ.get("MAX_CONTEXT_TOKENS", "128000"))
+    # Tokens held back from the prompt budget for the model's own reply so the
+    # request+completion fits the window. Default 8000 covers a long answer.
+    CONTEXT_RESPONSE_RESERVE_TOKENS = int(os.environ.get("CONTEXT_RESPONSE_RESERVE_TOKENS", "8000"))
+    # Legacy knob: kept for .env compatibility but no longer a hard cap on
+    # history — the token budget above is authoritative. Set to a very high
+    # value or ignore entirely. Left in config so older deployments don't
+    # blow up on missing key.
     MAX_HISTORY_MESSAGES = int(os.environ.get("MAX_HISTORY_MESSAGES", "50"))
 
     # Matrix

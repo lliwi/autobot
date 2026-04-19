@@ -851,6 +851,55 @@ details[open] summary { border-bottom: 1px solid var(--border); }
     background: var(--bg);
 }
 .chat-input form { display: flex; gap: 8px; }
+
+.context-meter {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 8px;
+    font-size: 10px;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--fg-dim);
+}
+.context-meter[hidden] { display: none; }
+.context-meter-bar {
+    flex: 1;
+    height: 4px;
+    background: var(--bg-raised);
+    border: 1px solid var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+}
+.context-meter-fill {
+    display: block;
+    height: 100%;
+    width: 0%;
+    background: var(--fg-dim);
+    transition: width 180ms ease-out, background-color 180ms;
+}
+.context-meter[data-state="ok"]   .context-meter-fill { background: oklch(0.72 0.15 150); }
+.context-meter[data-state="warn"] .context-meter-fill { background: var(--amber); }
+.context-meter[data-state="crit"] .context-meter-fill { background: var(--red); }
+.context-meter-label {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    white-space: nowrap;
+}
+.context-meter-label strong {
+    font-weight: 700;
+    color: var(--fg);
+    font-variant-numeric: tabular-nums;
+}
+.context-meter[data-state="warn"] .context-meter-label strong { color: var(--amber); }
+.context-meter[data-state="crit"] .context-meter-label strong { color: var(--red); }
+.context-meter-detail {
+    color: var(--fg-dim);
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 10px;
+}
 .chat-input textarea {
     flex: 1;
     padding: 10px 14px;

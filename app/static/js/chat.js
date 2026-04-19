@@ -9,9 +9,55 @@ document.addEventListener('DOMContentLoaded', () => {
     const HIDE_TOOL_KEY = 'autobot.chat.hideTool';
     const hideToolToggle = document.getElementById('hide-tool-toggle');
 
+    const meterEl = document.getElementById('context-meter');
+    const meterPctEl = document.getElementById('context-meter-pct');
+    const meterFillEl = meterEl ? meterEl.querySelector('.context-meter-fill') : null;
+    const meterDetailEl = document.getElementById('context-meter-detail');
+
     let sessionId = null;
     let streaming = false;
     let currentAgentName = '';
+    let contextBudget = null;
+
+    function formatTokens(n) {
+        if (n == null) return '–';
+        if (n >= 1000) return (n / 1000).toFixed(n >= 10000 ? 0 : 1) + 'k';
+        return String(n);
+    }
+
+    function renderContextMeter(totalTokens, budget) {
+        if (!meterEl) return;
+        if (!budget || totalTokens == null) {
+            meterEl.hidden = true;
+            return;
+        }
+        const pct = Math.min(100, Math.max(0, (totalTokens / budget) * 100));
+        const state = pct >= 90 ? 'crit' : pct >= 70 ? 'warn' : 'ok';
+        meterEl.hidden = false;
+        meterEl.dataset.state = state;
+        meterFillEl.style.width = pct.toFixed(1) + '%';
+        meterPctEl.textContent = pct.toFixed(pct >= 10 ? 0 : 1) + '%';
+        meterDetailEl.textContent = `${formatTokens(totalTokens)} / ${formatTokens(budget)} tokens`;
+    }
+
+    async function refreshContextMeter(agentId) {
+        if (!agentId) {
+            if (meterEl) meterEl.hidden = true;
+            return;
+        }
+        try {
+            const url = sessionId
+                ? `/api/chat/context?agent_id=${agentId}&session_id=${sessionId}`
+                : `/api/chat/context?agent_id=${agentId}`;
+            const res = await fetch(url);
+            if (!res.ok) return;
+            const data = await res.json();
+            contextBudget = data.budget;
+            renderContextMeter(data.total_tokens, data.budget);
+        } catch (_) {
+            // Non-fatal — the meter simply won't update until the next turn.
+        }
+    }
 
     function applyHideTool() {
         messagesDiv.classList.toggle('hide-tool', hideToolToggle.checked);
@@ -86,9 +132,11 @@ document.addEventListener('DOMContentLoaded', () => {
             localStorage.setItem(LAST_AGENT_KEY, agentId);
             await loadHistory(agentId);
             messageInput.focus();
+            refreshContextMeter(agentId);
         } else {
             sessionId = null;
             messagesDiv.innerHTML = '<p class="empty-state">Select an agent and start chatting.</p>';
+            if (meterEl) meterEl.hidden = true;
         }
     }
 
@@ -206,6 +254,12 @@ document.addEventListener('DOMContentLoaded', () => {
                 if (chunk.usage) {
                     const usage = chunk.usage;
                     appendMessage('tool', `Tokens: ${usage.input_tokens || 0} in / ${usage.output_tokens || 0} out`);
+                    // Update the meter from the model's real input_tokens —
+                    // that's exactly the size of the prompt we just sent.
+                    if (usage.budget) {
+                        contextBudget = usage.budget;
+                        renderContextMeter(usage.input_tokens || 0, usage.budget);
+                    }
                 }
                 break;
         }

@@ -8,6 +8,32 @@ from app.runtime.model_client import stream_chat_completion
 from app.runtime.tool_executor import execute as execute_tool
 MAX_TOOL_ROUNDS = 10
 
+# Per-call cap on what goes back into the *model's* message stream. The full
+# tool output is still persisted in ``tool_executions`` — this only trims
+# what the model sees on the next round so a single fat response (e.g. a
+# 200 KB fetch_url body) can't eat the whole context window.
+_TOOL_RESULT_MAX_CHARS = 20000
+
+
+def _cap_tool_result_content(result) -> str:
+    """Serialize a tool result for the model, truncating oversized payloads.
+
+    Returns a string ready to drop into a ``{"role": "tool", "content": ...}``
+    message. When truncated we append an explicit marker so the model knows
+    it didn't see the full output and can decide to fetch again with a
+    narrower query rather than hallucinate.
+    """
+    try:
+        raw = json.dumps(result)
+    except (TypeError, ValueError):
+        raw = json.dumps({"error": "tool result not JSON-serializable"})
+    if len(raw) <= _TOOL_RESULT_MAX_CHARS:
+        return raw
+    return (
+        raw[:_TOOL_RESULT_MAX_CHARS]
+        + f'\n[truncated-for-context: full length={len(raw)} chars stored in tool_executions]'
+    )
+
 _ENFORCE_ACTION_NUDGE = (
     "SYSTEM ENFORCEMENT: Your previous response announced intent without"
     " calling any tool, on a request that requires action. That is"
@@ -33,10 +59,17 @@ def run(agent, session, user_message, run_id):
     """
     messages = build_context(agent, session, user_message)
 
+    from app.runtime.context_budget import effective_budget
     from app.workspace.discovery import get_agent_tool_definitions
 
     tools = get_agent_tool_definitions(agent)
-    usage_total = {"input_tokens": 0, "output_tokens": 0}
+    # Surface the budget so the client can render a context-usage indicator
+    # after each turn without needing a second round-trip.
+    budget = effective_budget(
+        current_app.config["MAX_CONTEXT_TOKENS"],
+        current_app.config.get("CONTEXT_RESPONSE_RESERVE_TOKENS"),
+    )
+    usage_total = {"input_tokens": 0, "output_tokens": 0, "budget": budget}
     repeat_signatures: dict[str, int] = {}
     user_wants_action = is_task_like(user_message)
     action_nudge_used = False
@@ -142,11 +175,13 @@ def run(agent, session, user_message, run_id):
 
             yield json.dumps({"type": "tool_result", "data": {"tool": tool_name, "result": result}})
 
-            # Append tool result to messages for next model call
+            # Append tool result to messages for next model call. Oversized
+            # results are capped so one fat response doesn't blow the budget;
+            # the full result stays persisted in ``tool_executions``.
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc["id"],
-                "content": json.dumps(result),
+                "content": _cap_tool_result_content(result),
             })
 
         if abort_after_round:

@@ -27,6 +27,13 @@
             <textarea id="message-input" placeholder="Type a message..." rows="2" disabled></textarea>
             <button type="submit" id="send-btn" class="btn btn-primary" disabled>Send</button>
         </form>
+        <div id="context-meter" class="context-meter" data-state="idle" hidden>
+            <div class="context-meter-bar"><span class="context-meter-fill"></span></div>
+            <div class="context-meter-label">
+                Context <strong id="context-meter-pct">–</strong>
+                <span class="context-meter-detail" id="context-meter-detail"></span>
+            </div>
+        </div>
     </div>
 </div>
 

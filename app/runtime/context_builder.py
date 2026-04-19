@@ -1,6 +1,11 @@
 from flask import current_app
 
 from app.models.message import Message
+from app.runtime.context_budget import (
+    count_messages_tokens,
+    effective_budget,
+    trim_history_to_budget,
+)
 from app.workspace.loader import (
     load_agents,
     load_memory,
@@ -9,6 +14,12 @@ from app.workspace.loader import (
     load_soul,
     load_tools,
 )
+
+# DB-side safety net: never pull more than this many rows per turn regardless
+# of what the token budget would allow. Protects the runtime from sessions
+# that have grown into the thousands of messages. The token budget is the
+# real limit; this just keeps the SQL query bounded.
+_DB_HISTORY_HARD_CAP = 500
 
 TOOL_PROTOCOL = """## Action-first protocol (MANDATORY)
 
@@ -64,9 +75,12 @@ Auto-review:
 
 
 def build_context(agent, session, user_message):
-    """Build the messages array for the OpenAI API call."""
-    max_history = current_app.config["MAX_HISTORY_MESSAGES"]
+    """Build the messages array for the OpenAI API call.
 
+    Token-budgeted: the system prompt is always preserved intact, the current
+    user turn is always preserved, and chat history is packed newest-first
+    until the token budget is reached. See ``context_budget`` for the rules.
+    """
     # System prompt from workspace files
     security = load_security_baseline()
     soul = load_soul(agent)
@@ -111,26 +125,74 @@ def build_context(agent, session, user_message):
     if pending_section:
         system_parts.append(pending_section)
 
-    messages = []
-
+    system_messages: list[dict] = []
     if system_parts:
-        messages.append({"role": "system", "content": "\n\n".join(system_parts)})
+        system_messages.append({"role": "system", "content": "\n\n".join(system_parts)})
 
-    # Load message history
-    history = (
+    # Pull the newest N messages, then reverse to chronological order. The
+    # previous implementation used ``.order_by(asc).limit(N)`` which returned
+    # the OLDEST N rows — after ~50 messages the chat effectively froze its
+    # memory in the distant past.
+    newest_rows = (
         Message.query.filter_by(session_id=session.id)
-        .order_by(Message.created_at.asc())
-        .limit(max_history)
+        .order_by(Message.created_at.desc())
+        .limit(_DB_HISTORY_HARD_CAP)
         .all()
     )
+    history_rows = list(reversed(newest_rows))
 
-    for msg in history:
-        messages.append({"role": msg.role, "content": msg.content})
+    # ``chat_service`` persists the user turn *before* calling the runtime so
+    # it appears in the session history immediately. That means the row we
+    # just loaded includes the current turn — strip it so we don't duplicate
+    # the user message (it's added back via ``user_turn`` below).
+    if (
+        history_rows
+        and history_rows[-1].role == "user"
+        and history_rows[-1].content == user_message
+    ):
+        history_rows = history_rows[:-1]
 
-    # Add the new user message
-    messages.append({"role": "user", "content": user_message})
+    history_messages = [{"role": m.role, "content": m.content} for m in history_rows]
+    user_turn = {"role": "user", "content": user_message}
 
-    return messages
+    budget = effective_budget(
+        current_app.config["MAX_CONTEXT_TOKENS"],
+        current_app.config.get("CONTEXT_RESPONSE_RESERVE_TOKENS"),
+    )
+    result = trim_history_to_budget(system_messages, history_messages, user_turn, budget)
+
+    if result.dropped or result.over_budget:
+        level = current_app.logger.warning if result.over_budget else current_app.logger.info
+        level(
+            "context_budget: agent=%s session=%s budget=%d total=%d "
+            "system=%d history=%d user=%d kept=%d dropped=%d over_budget=%s",
+            agent.id, session.id, result.budget, result.total_tokens,
+            result.system_tokens, result.history_tokens, result.user_tokens,
+            result.kept, result.dropped, result.over_budget,
+        )
+
+    return result.messages
+
+
+def estimate_context_tokens(agent, session, user_message) -> dict:
+    """Introspection helper: how many tokens would this turn cost?
+
+    Runs the full assembly without side effects so dashboards/observability
+    can report live context pressure. Returns the same numbers that
+    ``build_context`` would log.
+    """
+    messages = build_context(agent, session, user_message)
+    total = count_messages_tokens(messages)
+    budget = effective_budget(
+        current_app.config["MAX_CONTEXT_TOKENS"],
+        current_app.config.get("CONTEXT_RESPONSE_RESERVE_TOKENS"),
+    )
+    return {
+        "total_tokens": total,
+        "budget": budget,
+        "headroom": budget - total,
+        "message_count": len(messages),
+    }
 
 
 def _render_live_agent_roster(agent) -> str:
