@@ -2,6 +2,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const agentSelect = document.getElementById('agent-select');
     const messageInput = document.getElementById('message-input');
     const sendBtn = document.getElementById('send-btn');
+    const stopBtn = document.getElementById('stop-btn');
     const chatForm = document.getElementById('chat-form');
     const messagesDiv = document.getElementById('messages');
 
@@ -18,6 +19,15 @@ document.addEventListener('DOMContentLoaded', () => {
     let streaming = false;
     let currentAgentName = '';
     let contextBudget = null;
+    let abortController = null;
+
+    function setStreamingUI(isStreaming) {
+        streaming = isStreaming;
+        sendBtn.hidden = isStreaming;
+        stopBtn.hidden = !isStreaming;
+        sendBtn.disabled = isStreaming;
+        messageInput.disabled = isStreaming;
+    }
 
     function formatTokens(n) {
         if (n == null) return '–';
@@ -162,13 +172,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         appendMessage('user', message);
 
-        streaming = true;
-        sendBtn.disabled = true;
-        messageInput.disabled = true;
+        setStreamingUI(true);
 
         const assistantDiv = appendMessage('assistant', '', labelFor('assistant'));
         const contentSpan = assistantDiv.querySelector('.chat-msg-content');
 
+        abortController = new AbortController();
         try {
             const response = await fetch('/api/chat', {
                 method: 'POST',
@@ -177,7 +186,8 @@ document.addEventListener('DOMContentLoaded', () => {
                     agent_id: parseInt(agentSelect.value),
                     message: message,
                     session_id: sessionId
-                })
+                }),
+                signal: abortController.signal
             });
 
             const reader = response.body.getReader();
@@ -206,14 +216,26 @@ document.addEventListener('DOMContentLoaded', () => {
                 }
             }
         } catch (err) {
-            contentSpan.textContent += `\n[Error: ${err.message}]`;
+            if (err.name === 'AbortError') {
+                // User-initiated stop. Mark the partial response so it's
+                // visually obvious the turn didn't finish naturally.
+                contentSpan.textContent += '\n\n[stopped]';
+            } else {
+                contentSpan.textContent += `\n[Error: ${err.message}]`;
+            }
+        } finally {
+            abortController = null;
         }
 
-        streaming = false;
-        sendBtn.disabled = false;
-        messageInput.disabled = false;
+        setStreamingUI(false);
         messageInput.focus();
         scrollToBottom();
+    });
+
+    stopBtn.addEventListener('click', () => {
+        if (abortController) {
+            abortController.abort();
+        }
     });
 
     messageInput.addEventListener('keydown', (e) => {
