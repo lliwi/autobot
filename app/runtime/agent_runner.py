@@ -2,10 +2,23 @@ import json
 
 from flask import current_app
 
+from app.runtime.action_heuristics import is_task_like, looks_like_promise
 from app.runtime.context_builder import build_context
 from app.runtime.model_client import stream_chat_completion
 from app.runtime.tool_executor import execute as execute_tool
 MAX_TOOL_ROUNDS = 10
+
+_ENFORCE_ACTION_NUDGE = (
+    "SYSTEM ENFORCEMENT: Your previous response announced intent without"
+    " calling any tool, on a request that requires action. That is"
+    " forbidden by the action-first protocol. Re-answer now by executing"
+    " the task with the appropriate tool calls. Rules for this retry:"
+    " (a) do not apologize, do not re-state the plan, do not ask permission;"
+    " (b) do not use the phrases 'voy a', 'lo haré', 'I will', 'let me', etc.;"
+    " (c) if you genuinely lack a tool for this task, call `create_tool` or"
+    " `fetch_url` — do not give up; (d) if a credential is missing, call"
+    " `list_credentials` to verify before telling the user it's missing."
+)
 
 
 def run(agent, session, user_message, run_id):
@@ -25,6 +38,8 @@ def run(agent, session, user_message, run_id):
     tools = get_agent_tool_definitions(agent)
     usage_total = {"input_tokens": 0, "output_tokens": 0}
     repeat_signatures: dict[str, int] = {}
+    user_wants_action = is_task_like(user_message)
+    action_nudge_used = False
 
     for round_num in range(MAX_TOOL_ROUNDS):
         full_response = ""
@@ -56,6 +71,27 @@ def run(agent, session, user_message, run_id):
             return
 
         if not tool_calls:
+            if (
+                user_wants_action
+                and not action_nudge_used
+                and looks_like_promise(full_response)
+            ):
+                # Stalled on a task: announced intent, never tool-called.
+                # Re-prompt once before giving up.
+                action_nudge_used = True
+                messages.append({
+                    "role": "assistant",
+                    "content": full_response or "",
+                })
+                messages.append({
+                    "role": "system",
+                    "content": _ENFORCE_ACTION_NUDGE,
+                })
+                current_app.logger.info(
+                    "agent_runner nudge: agent=%s round=%d user_task=1 promise=1",
+                    agent.id, round_num,
+                )
+                continue
             # No tool calls — we're done
             yield json.dumps({"type": "done", "data": full_response, "usage": usage_total})
             return
