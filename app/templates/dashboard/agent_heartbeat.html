@@ -57,8 +57,8 @@
                     {% if o.description %}<br><small>{{ o.description }}</small>{% endif %}
                 </td>
                 <td><span class="badge badge-{{ o.status }}">{{ o.status }}</span></td>
-                <td>{{ o.next_check_at.strftime('%Y-%m-%d %H:%M') if o.next_check_at else 'now' }}</td>
-                <td>{{ o.last_progress_at.strftime('%Y-%m-%d %H:%M') if o.last_progress_at else '—' }}</td>
+                <td>{{ (o.next_check_at | localtz) if o.next_check_at else 'now' }}</td>
+                <td>{{ (o.last_progress_at | localtz) if o.last_progress_at else '—' }}</td>
                 <td>
                     <form method="POST" action="{{ url_for('dashboard.objective_update', objective_id=o.id) }}" style="display:inline;">
                         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -98,7 +98,7 @@
         <tbody>
             {% for e in recent_events %}
             <tr>
-                <td>{{ e.tick_at.strftime('%Y-%m-%d %H:%M:%S') if e.tick_at else '-' }}</td>
+                <td>{{ e.tick_at | localtz('%Y-%m-%d %H:%M:%S') }}</td>
                 <td><span class="badge badge-{{ 'success' if e.decision == 'act' else 'info' if e.decision == 'defer' else 'inactive' }}">{{ e.decision }}</span></td>
                 <td><small>{{ e.reason }}</small></td>
                 <td>{% if e.run_id %}<a href="#">#{{ e.run_id }}</a>{% else %}—{% endif %}</td>

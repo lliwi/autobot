@@ -30,7 +30,7 @@
             <td><code>{{ sub.slug }}</code></td>
             <td>{{ sub.model_name }}</td>
             <td><span class="badge badge-{{ sub.status }}">{{ sub.status }}</span></td>
-            <td>{{ sub.created_at.strftime('%Y-%m-%d') if sub.created_at else '-' }}</td>
+            <td>{{ sub.created_at | localtz('%Y-%m-%d') }}</td>
             <td>
                 <form method="POST" action="{{ url_for('dashboard.agent_toggle', agent_id=sub.id) }}" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

@@ -55,7 +55,7 @@
             <td>{% if r.agent %}{{ r.agent.name }}{% else %}<em>any</em>{% endif %}</td>
             <td><code>{{ r.pattern }}</code></td>
             <td>{{ r.note or '—' }}</td>
-            <td>{{ r.created_at.strftime('%Y-%m-%d %H:%M') if r.created_at else '-' }}</td>
+            <td>{{ r.created_at | localtz }}</td>
             <td>
                 <form method="POST" action="{{ url_for('dashboard.approval_rule_delete', rule_id=r.id) }}" style="display:inline;" onsubmit="return confirm('Delete this rule?');">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

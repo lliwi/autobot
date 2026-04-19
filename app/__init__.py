@@ -1,4 +1,5 @@
 import os
+from datetime import datetime, timezone
 
 from flask import Flask
 
@@ -22,6 +23,7 @@ def create_app(config_name=None):
     csrf.init_app(app)
 
     configure_logging(app)
+    register_template_filters(app)
 
     # Register blueprints
     from app.api import api_bp
@@ -34,6 +36,48 @@ def create_app(config_name=None):
     register_cli(app)
 
     return app
+
+
+def register_template_filters(app):
+    """Make DB datetimes render in the configured local timezone.
+
+    Models store all timestamps in UTC (many as *naive* datetimes created with
+    ``datetime.now(timezone.utc)`` but stored in a column without ``timezone=True``).
+    Without conversion, templates rendered UTC regardless of the ``TZ`` env var,
+    which is confusing for users living in CEST/CET. This filter:
+
+      1. Treats naive datetimes as UTC (matches how the app writes them).
+      2. Converts to the zone given by ``APP_TIMEZONE``/``TZ``, falling back to
+         ``Europe/Madrid`` for this project; then to UTC if even that fails.
+      3. Formats with ``strftime``. The empty/``None`` case returns ``"-"`` so
+         templates stop needing ``{% if foo %}`` guards around every call.
+    """
+    try:
+        from zoneinfo import ZoneInfo
+    except ImportError:  # pragma: no cover — Python 3.9+ always has zoneinfo
+        ZoneInfo = None
+
+    tz_name = (
+        app.config.get("APP_TIMEZONE")
+        or os.environ.get("TZ")
+        or "UTC"
+    )
+    try:
+        local_tz = ZoneInfo(tz_name) if ZoneInfo else timezone.utc
+    except Exception:
+        app.logger.warning("Unknown timezone %r, falling back to UTC", tz_name)
+        local_tz = timezone.utc
+
+    def localtz(value, fmt="%Y-%m-%d %H:%M"):
+        if value is None:
+            return "-"
+        if not isinstance(value, datetime):
+            return value
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value.astimezone(local_tz).strftime(fmt)
+
+    app.jinja_env.filters["localtz"] = localtz
 
 
 def register_cli(app):

@@ -29,7 +29,7 @@
             <td>{{ agent.model_name }}</td>
             <td>{% if agent.parent_agent %}<a href="{{ url_for('dashboard.agent_detail', agent_id=agent.parent_agent.id) }}">{{ agent.parent_agent.name }}</a>{% else %}-{% endif %}</td>
             <td><span class="badge badge-{{ agent.status }}">{{ agent.status }}</span></td>
-            <td>{{ agent.created_at.strftime('%Y-%m-%d') if agent.created_at else '-' }}</td>
+            <td>{{ agent.created_at | localtz('%Y-%m-%d') }}</td>
             <td>
                 <form method="POST" action="{{ url_for('dashboard.agent_toggle', agent_id=agent.id) }}" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

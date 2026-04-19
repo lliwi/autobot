@@ -86,7 +86,7 @@
                 <td><span class="badge badge-{{ run.status }}">{{ run.status }}</span></td>
                 <td>{{ run.duration_ms or '-' }} ms</td>
                 <td>{{ (run.input_tokens or 0) + (run.output_tokens or 0) }}</td>
-                <td>{{ run.started_at.strftime('%Y-%m-%d %H:%M') if run.started_at else '-' }}</td>
+                <td>{{ run.started_at | localtz }}</td>
             </tr>
             {% endfor %}
         </tbody>

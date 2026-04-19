@@ -106,7 +106,18 @@ def _pct(used: float | None) -> dict | None:
 
 
 def _iso(dt: datetime | None) -> str | None:
-    return dt.isoformat() if dt else None
+    """Serialize a datetime as an ISO-8601 string that carries an explicit UTC
+    offset. The DB column is ``DateTime`` (not ``DateTime(timezone=True)``),
+    so SQLAlchemy strips tzinfo on write and reads back naive values — feeding
+    those directly into ``new Date(...)`` on the browser makes it guess local
+    time and misrender by the offset. Everything we store here is already UTC,
+    so we just re-apply ``timezone.utc`` before serializing.
+    """
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return dt.isoformat()
 
 
 def get_latest_snapshot() -> dict | None:

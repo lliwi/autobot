@@ -1,6 +1,7 @@
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
-from flask import flash, redirect, render_template, request, url_for
+from flask import current_app, flash, redirect, render_template, request, url_for
 from flask_login import login_required
 from sqlalchemy import func
 
@@ -20,6 +21,15 @@ def _aware(dt):
     if dt is None:
         return None
     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+
+
+def _local_tz():
+    """Resolve the configured display timezone, falling back to UTC."""
+    name = current_app.config.get("APP_TIMEZONE") or "UTC"
+    try:
+        return ZoneInfo(name)
+    except Exception:
+        return timezone.utc
 
 
 @dashboard_bp.route("/")
@@ -183,7 +193,7 @@ def overview():
     events.sort(key=lambda e: e["when"] or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
     events = events[:8]
     for e in events:
-        e["time_str"] = e["when"].strftime("%H:%M:%S") if e["when"] else "—"
+        e["time_str"] = e["when"].astimezone(_local_tz()).strftime("%H:%M:%S") if e["when"] else "—"
 
     return render_template(
         "dashboard/overview.html",

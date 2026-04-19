@@ -69,6 +69,12 @@ class Config:
     PIP_INSTALL_TIMEOUT_SECONDS = int(os.environ.get("PIP_INSTALL_TIMEOUT_SECONDS", "180"))
     WORKSPACE_TOOL_TIMEOUT_SECONDS = int(os.environ.get("WORKSPACE_TOOL_TIMEOUT_SECONDS", "30"))
 
+    # Display timezone for admin UI. Defaults to the container's ``TZ`` when
+    # set (so matching .env is enough), otherwise Europe/Madrid for this
+    # project. All timestamps in the DB stay in UTC — this only affects
+    # rendering via the ``localtz`` Jinja filter.
+    APP_TIMEZONE = os.environ.get("APP_TIMEZONE") or os.environ.get("TZ") or "Europe/Madrid"
+
     # Session
     SESSION_COOKIE_HTTPONLY = True
     SESSION_COOKIE_SAMESITE = "Lax"

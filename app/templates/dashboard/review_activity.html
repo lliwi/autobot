@@ -65,7 +65,7 @@
         {% for evt in events %}
         <tr>
             <td>{{ evt.id }}</td>
-            <td>{{ evt.created_at.strftime('%Y-%m-%d %H:%M') if evt.created_at else '-' }}</td>
+            <td>{{ evt.created_at | localtz }}</td>
             <td>
                 {% if evt.agent %}
                     <a href="{{ url_for('dashboard.agent_detail', agent_id=evt.agent_id) }}">{{ evt.agent.name }}</a>

@@ -31,8 +31,8 @@
             <td><code>{{ task.schedule_expr or '-' }}</code></td>
             <td>{{ task.timezone }}</td>
             <td><span class="badge badge-{{ 'active' if task.enabled else 'inactive' }}">{{ 'Yes' if task.enabled else 'No' }}</span></td>
-            <td>{{ task.last_run_at.strftime('%Y-%m-%d %H:%M') if task.last_run_at else '-' }}</td>
-            <td>{{ task.next_run_at.strftime('%Y-%m-%d %H:%M') if task.next_run_at else '-' }}</td>
+            <td>{{ task.last_run_at | localtz }}</td>
+            <td>{{ task.next_run_at | localtz }}</td>
             <td>{{ task.retry_count }}/{{ task.max_retries }}</td>
             <td>
                 <form method="POST" action="{{ url_for('dashboard.scheduler_toggle', task_id=task.id) }}" style="display:inline;">

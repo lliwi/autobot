@@ -38,11 +38,11 @@
         </span>
     </div>
     <div class="detail-item">
-        <strong>Created:</strong> {{ patch.created_at.strftime('%Y-%m-%d %H:%M:%S') if patch.created_at else '-' }}
+        <strong>Created:</strong> {{ patch.created_at | localtz('%Y-%m-%d %H:%M:%S') }}
     </div>
     {% if patch.applied_at %}
     <div class="detail-item">
-        <strong>Applied:</strong> {{ patch.applied_at.strftime('%Y-%m-%d %H:%M:%S') }}
+        <strong>Applied:</strong> {{ patch.applied_at | localtz('%Y-%m-%d %H:%M:%S') }}
     </div>
     {% endif %}
     {% if patch.run_id %}
