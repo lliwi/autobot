@@ -117,7 +117,14 @@ def overview():
         agents_working_names += f", +{len(busy_agents) - 3}"
 
     # Activity bars — last 24 hourly buckets
-    window_start = now.replace(minute=0, second=0, microsecond=0) - timedelta(hours=23)
+    # Window starts on the hour mark of "now - 23h" in *local* time so that
+    # the axis tick labels line up with real wall-clock hours for the user
+    # (e.g. 00:00, 06:00 in Madrid) rather than UTC-aligned buckets that
+    # happen to drift by the local offset.
+    local_tz = _local_tz()
+    now_local = now.astimezone(local_tz)
+    window_start_local = now_local.replace(minute=0, second=0, microsecond=0) - timedelta(hours=23)
+    window_start = window_start_local.astimezone(timezone.utc)
     execs = ToolExecution.query.filter(
         ToolExecution.started_at >= window_start
     ).with_entities(ToolExecution.started_at, ToolExecution.status).all()
@@ -133,16 +140,24 @@ def overview():
     max_bin = max(bins_total) or 1
     bars = []
     for i in range(24):
-        hour_ts = window_start + timedelta(hours=i)
+        hour_ts_local = window_start_local + timedelta(hours=i)
         count = bins_total[i]
         bars.append({
-            "hour": hour_ts.hour,
+            "hour": hour_ts_local.hour,
             "count": count,
             "errors": bins_err[i],
             "pct": round(count / max_bin * 100) if max_bin else 0,
             "err_pct": round(bins_err[i] / max_bin * 100) if max_bin else 0,
             "is_now": i == 23,
         })
+
+    # Axis ticks: render 4 evenly-spaced hour labels (0, 6, 12, 18 slots into
+    # the window) plus "now" at the end so the labels always match the bars
+    # underneath, not a static clock.
+    axis_labels = [
+        (window_start_local + timedelta(hours=h)).strftime("%H:%M")
+        for h in (0, 6, 12, 18)
+    ] + ["now"]
 
     # Recent events — mixed timeline
     events = []
@@ -215,6 +230,7 @@ def overview():
         agents_working_names=agents_working_names,
         # activity
         bars=bars,
+        axis_labels=axis_labels,
         # events
         events=events,
         # codex

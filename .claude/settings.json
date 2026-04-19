@@ -68,7 +68,8 @@
       "Bash(./scripts/backup.sh)",
       "Bash(sudo rm *)",
       "Bash(./scripts/backup.sh --help)",
-      "Bash(python3 -c \"import ast; [ast.parse\\(open\\(p\\).read\\(\\)\\) for p in ['/home/llibert/Documents/development/flask/autobot/app/__init__.py','/home/llibert/Documents/development/flask/autobot/app/config.py','/home/llibert/Documents/development/flask/autobot/app/dashboard/views.py']]; print\\('OK'\\)\")"
+      "Bash(python3 -c \"import ast; [ast.parse\\(open\\(p\\).read\\(\\)\\) for p in ['/home/llibert/Documents/development/flask/autobot/app/__init__.py','/home/llibert/Documents/development/flask/autobot/app/config.py','/home/llibert/Documents/development/flask/autobot/app/dashboard/views.py']]; print\\('OK'\\)\")",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('/home/llibert/Documents/development/flask/autobot/app/dashboard/views.py'\\).read\\(\\)\\); print\\('OK'\\)\")"
     ],
     "additionalDirectories": [
       "/tmp"
