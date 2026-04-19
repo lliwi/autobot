@@ -62,7 +62,12 @@
       "Bash(curl -sS -fL -m 20 -o htmx.min.js \"https://cdnjs.cloudflare.com/ajax/libs/htmx/2.0.4/htmx.min.js\" -w \"htmx: %{http_code} %{size_download}b\\\\n\")",
       "Bash(curl -sS -c /tmp/c.jar -b /tmp/c.jar -X POST http://localhost:5000/api/auth/login -H 'Content-Type: application/json' -d '{\"email\":\"admin@autobot.local\",\"password\":\"admin123\"}' -w \"\\\\nlogin: %{http_code}\\\\n\")",
       "Bash(curl -sS -b /tmp/c.jar \"http://localhost:5000/api/chat/context?agent_id=4\" -w \"\\\\nctx: %{http_code}\\\\n\")",
-      "Bash(python3 -c \"import ast; ast.parse\\(open\\('/home/llibert/Documents/development/flask/autobot/app/runtime/agent_runner.py'\\).read\\(\\)\\); ast.parse\\(open\\('/home/llibert/Documents/development/flask/autobot/app/runtime/context_builder.py'\\).read\\(\\)\\); ast.parse\\(open\\('/home/llibert/Documents/development/flask/autobot/app/runtime/tool_registry.py'\\).read\\(\\)\\); print\\('OK'\\)\")"
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('/home/llibert/Documents/development/flask/autobot/app/runtime/agent_runner.py'\\).read\\(\\)\\); ast.parse\\(open\\('/home/llibert/Documents/development/flask/autobot/app/runtime/context_builder.py'\\).read\\(\\)\\); ast.parse\\(open\\('/home/llibert/Documents/development/flask/autobot/app/runtime/tool_registry.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(python3 -c \"import ast; ast.parse\\(open\\('/home/llibert/Documents/development/flask/autobot/app/services/bundle_service.py'\\).read\\(\\)\\); ast.parse\\(open\\('/home/llibert/Documents/development/flask/autobot/app/__init__.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
+      "Bash(chmod +x /home/llibert/Documents/development/flask/autobot/scripts/backup.sh)",
+      "Bash(./scripts/backup.sh)",
+      "Bash(sudo rm *)",
+      "Bash(./scripts/backup.sh --help)"
     ],
     "additionalDirectories": [
       "/tmp"

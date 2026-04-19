@@ -167,6 +167,77 @@ def register_cli(app):
         else:
             click.echo("  Not logged in. Run `flask codex-login` to connect.")
 
+    @app.cli.command("export-bundle")
+    @click.option("--output", "-o", required=True, type=click.Path(dir_okay=False),
+                  help="Path to the .tar.gz bundle to write.")
+    @click.option("--include-env", is_flag=True, default=False,
+                  help="Include the project .env verbatim (contains secrets).")
+    @click.option("--include-secrets", is_flag=True, default=False,
+                  help="Include decrypted credential values in credentials.json.")
+    @click.confirmation_option(
+        "--yes", "-y",
+        prompt="This will snapshot agents, workspaces, tools, skills, packages"
+               " and (optionally) credentials and .env to a tarball. Continue?",
+    )
+    def export_bundle(output, include_env, include_secrets):
+        """Export agents, workspaces, tools, skills, packages, credentials and .env to a portable bundle."""
+        from app.services import bundle_service
+
+        if not bundle_service.is_valid_bundle_name(output):
+            raise click.UsageError("Output must end in .tar.gz or .tgz")
+
+        if include_env or include_secrets:
+            click.echo("  ⚠ The bundle will contain secrets in plaintext. Protect the file accordingly.")
+
+        report = bundle_service.export_bundle(
+            output,
+            include_env=include_env,
+            include_secrets=include_secrets,
+        )
+        click.echo(f"  ✓ Bundle written to {report.path}")
+        click.echo(f"    agents={report.agents} tools={report.tools} skills={report.skills}"
+                   f" packages={report.packages} credentials={report.credentials}"
+                   f" workspaces={report.workspaces}")
+        if report.included_env:
+            click.echo("    included .env")
+        if report.included_secrets:
+            click.echo("    included credential values")
+
+    @app.cli.command("import-bundle")
+    @click.option("--input", "-i", "input_path", required=True,
+                  type=click.Path(exists=True, dir_okay=False),
+                  help="Path to the .tar.gz bundle to load.")
+    @click.option("--overwrite", is_flag=True, default=False,
+                  help="Replace existing rows / files when the slug matches.")
+    @click.confirmation_option(
+        "--yes", "-y",
+        prompt="This will write into the database and workspaces. Continue?",
+    )
+    def import_bundle(input_path, overwrite):
+        """Import an Autobot bundle produced by `flask export-bundle`."""
+        from app.services import bundle_service
+
+        try:
+            report = bundle_service.import_bundle(input_path, overwrite=overwrite)
+        except ValueError as e:
+            raise click.ClickException(str(e)) from e
+
+        click.echo("  ✓ Import complete.")
+        click.echo(
+            f"    agents +{report.agents_created}/±{report.agents_updated}/skip {report.agents_skipped}"
+            f"   tools +{report.tools_created}/±{report.tools_updated}"
+            f"   skills +{report.skills_created}/±{report.skills_updated}"
+        )
+        click.echo(
+            f"    packages +{report.packages_created}/±{report.packages_updated}"
+            f"   credentials +{report.credentials_created}/±{report.credentials_updated}"
+            f"   workspaces={report.workspaces_restored}"
+        )
+        if report.env_written:
+            click.echo("    .env written (restart services to pick up changes)")
+        for w in report.warnings:
+            click.echo(f"  ⚠ {w}")
+
 
 def _run_codex_login(app):
     """Interactive Codex OAuth/PKCE flow.

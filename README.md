@@ -16,7 +16,7 @@ cp .env.example .env
 # 2. Arrancar servicios
 docker compose up -d
 
-# 3. Setup inicial interactivo (migraciones, usuario admin, clave de cifrado, OAuth)
+# 3. Setup inicial interactivo (migraciones, admin, clave de cifrado, OAuth, agentes, Matrix)
 docker compose run --rm web flask onboard
 
 # 4. Abrir el dashboard
@@ -24,10 +24,12 @@ open http://localhost:5000
 ```
 
 El comando `flask onboard` guía paso a paso la configuración inicial:
-- Aplica las migraciones de base de datos
+- Aplica migraciones
 - Crea el usuario administrador
-- Genera la clave de cifrado para tokens OAuth (`TOKEN_ENCRYPTION_KEY`)
-- Muestra las variables necesarias para configurar OpenAI Codex OAuth
+- Genera la `TOKEN_ENCRYPTION_KEY` (Fernet) para cifrar credenciales y tokens OAuth
+- Lanza el flujo OAuth de OpenAI Codex (PKCE, callback local en `localhost:1455`)
+- Aprovisiona los dos agentes por defecto: **optimus** (orquestador) y **reviewer**
+- Configura (opcional) el canal Matrix
 
 ## Configuración
 
@@ -38,33 +40,42 @@ Todas las variables se definen en `.env`. Ver `.env.example` para referencia.
 | `SECRET_KEY` | Clave secreta de Flask para sesiones | Sí |
 | `DATABASE_URL` | URI de conexión a PostgreSQL | Sí |
 | `REDIS_URL` | URI de conexión a Redis | Sí |
-| `TOKEN_ENCRYPTION_KEY` | Clave Fernet para cifrar tokens OAuth en reposo | Para OAuth |
-| `OPENAI_CLIENT_ID` | Client ID de la app OAuth de OpenAI | Para chat |
-| `OPENAI_CLIENT_SECRET` | Client Secret de la app OAuth de OpenAI | Para chat |
-| `OPENAI_REDIRECT_URI` | URI de callback OAuth | Para chat |
-| `OPENAI_MODEL` | Modelo por defecto (default: `o4-mini`) | No |
-| `MAX_CONTEXT_TOKENS` | Límite de tokens de contexto (default: `128000`) | No |
-| `MAX_HISTORY_MESSAGES` | Mensajes de historial a incluir (default: `50`) | No |
+| `TOKEN_ENCRYPTION_KEY` | Clave Fernet para cifrar credenciales y tokens OAuth en reposo | Sí |
+| `OPENAI_MODEL` | Modelo Codex por defecto (e.g. `gpt-5.2`) | No |
+| `MAX_CONTEXT_TOKENS` | Límite del contexto del modelo (default: `128000`) | No |
+| `CONTEXT_RESPONSE_RESERVE_TOKENS` | Tokens reservados para la respuesta del modelo (default: `8000`) | No |
+| `MAX_HISTORY_MESSAGES` | Cap legacy; ya no es el límite real, lo es el budget de tokens | No |
+| `WORKSPACES_BASE_PATH` | Raíz de los workspaces (default: `./workspaces`) | No |
+| `PACKAGE_ALLOWLIST` | PyPI auto-instalables en venvs de workspace (CSV) | No |
+| `VENV_BASE_PACKAGES` | Packages preinstalados en cada venv nuevo (CSV) | No |
+| `PIP_INSTALL_TIMEOUT_SECONDS` | Timeout de `pip install` (default: `180`) | No |
+| `WORKSPACE_TOOL_TIMEOUT_SECONDS` | Timeout por ejecución de tool de workspace (default: `30`) | No |
+| `AVATAR_UPLOAD_DIR` | Directorio de avatares subidos (default: `./instance/avatars`) | No |
+| `AVATAR_MAX_BYTES` | Tamaño máximo por avatar (default: `2 MB`) | No |
+| `MFA_ISSUER` | Issuer mostrado en apps TOTP (default: `Autobot`) | No |
+| `AUTOBOT_CRED_<NAME>` | Credencial preseeded desde entorno — visible a los agentes por `get_credential` con `source=env` | No |
 | `MATRIX_HOMESERVER` | URL del servidor Matrix (e.g. `https://matrix.org`) | Para Matrix |
 | `MATRIX_USER_ID` | User ID del bot Matrix (e.g. `@bot:matrix.org`) | Para Matrix |
 | `MATRIX_PASSWORD` | Contraseña del bot Matrix | Para Matrix |
-| `MATRIX_ALLOWED_ROOMS` | IDs de salas permitidas, separados por coma (vacío = todas) | No |
-| `MATRIX_ALLOWED_USERS` | User IDs permitidos, separados por coma (vacío = todos) | No |
-| `MATRIX_ALLOWED_DM_USERS` | Allowlist específica para DMs (vacío = usa `MATRIX_ALLOWED_USERS`) | No |
+| `MATRIX_ALLOWED_ROOMS` | IDs de salas permitidas (CSV, vacío = todas) | No |
+| `MATRIX_ALLOWED_USERS` | User IDs permitidos (CSV, vacío = todos) | No |
+| `MATRIX_ALLOWED_DM_USERS` | Allowlist DM (vacío = usa `MATRIX_ALLOWED_USERS`) | No |
 | `MATRIX_GROUP_POLICY` | Política de respuesta en grupo: `always`, `mention`, `allowlist` | No |
 | `SCHEDULER_ENABLED` | Activar scheduler (default: `true`) | No |
-| `HEARTBEAT_INTERVAL_MINUTES` | Intervalo de heartbeat en minutos (default: `15`) | No |
+| `HEARTBEAT_INTERVAL_MINUTES` | Intervalo por defecto del heartbeat (default: `15`) | No |
 
-### Configuración de OpenAI Codex OAuth
+### Codex OAuth
 
-1. Crear una aplicación OAuth en [platform.openai.com](https://platform.openai.com)
-2. Configurar la redirect URI: `http://localhost:5000/api/oauth/openai/callback`
-3. Añadir `OPENAI_CLIENT_ID` y `OPENAI_CLIENT_SECRET` en `.env`
-4. Generar clave de cifrado: `docker compose run --rm web python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"`
-5. Añadir `TOKEN_ENCRYPTION_KEY` en `.env`
-6. Reiniciar: `docker compose restart web`
-7. Desde el dashboard o via API, iniciar el flujo OAuth: `GET /api/oauth/openai/start`
-8. Asociar el perfil OAuth a un agente
+El login con Codex ya no usa un flujo web-OAuth redirigido al navegador del usuario. Se hace por
+PKCE desde la línea de comandos:
+
+```bash
+docker compose run --rm web flask codex-login     # levanta callback en :1455 e imprime la URL
+docker compose run --rm web flask codex-status    # muestra estado/cuenta
+docker compose run --rm web flask codex-logout    # borra el token
+```
+
+`flask onboard` ejecuta `codex-login` automáticamente.
 
 ## Comandos
 
@@ -83,14 +94,45 @@ docker compose run --rm web flask db upgrade                     # Aplicar migra
 docker compose run --rm web flask db downgrade                   # Revertir última migración
 
 # Administración
-docker compose run --rm web flask onboard                                        # Setup interactivo
-docker compose run --rm web flask create-admin --email user@mail.com --password pass  # Crear admin
+docker compose run --rm web flask onboard                              # Setup interactivo completo
+docker compose run --rm web flask setup-default-agents                 # (Re)configurar optimus + reviewer
+docker compose run --rm web flask setup-matrix                         # Configurar sólo el canal Matrix
+docker compose run --rm web flask create-admin --email u@m.com --password pw
+
+# Codex
+docker compose run --rm web flask codex-login
+docker compose run --rm web flask codex-logout
+docker compose run --rm web flask codex-status
+
+# Backup / portabilidad
+docker compose exec web flask export-bundle -o /tmp/autobot.tar.gz [--include-env] [--include-secrets]
+docker compose exec web flask import-bundle -i /tmp/autobot.tar.gz [--overwrite]
 
 # Desarrollo
-docker compose build web          # Rebuild tras cambios en dependencias
+docker compose build web                              # Rebuild tras cambios en dependencias
 docker compose run --rm web pytest                    # Ejecutar tests
 docker compose run --rm web pytest tests/test_auth.py # Ejecutar un test específico
 ```
+
+### Exportar e importar una instalación
+
+`export-bundle` snapshotea toda la instalación (DB + filesystem) en un `tar.gz` portable:
+
+- `manifest.json` — versión de esquema, timestamp y contadores
+- `agents.json`, `tools.json`, `skills.json`, `packages.json`, `credentials.json` — filas DB serializadas por `slug`
+- `workspaces/<slug>/` — contenido completo del workspace (excluye `.venv`, `runs/`, `__pycache__/`)
+- `.env` — opcional (`--include-env`)
+
+Las credenciales se exportan **descifradas** sólo con `--include-secrets` (el tarball no está
+cifrado, protégelo fuera). En el `import-bundle` se re-cifran con la `TOKEN_ENCRYPTION_KEY` del
+destino, así que las dos instalaciones no necesitan compartir clave.
+
+Conflictos en import:
+- Sin `--overwrite`: filas y ficheros existentes se respetan (se cuentan como `skipped`).
+- Con `--overwrite`: las filas se actualizan in-place (mismo id, FKs intactas) y los ficheros del workspace se reemplazan.
+
+Los packages se importan siempre en `pending_review` (salvo los que ya estaban `rejected`) para
+que el instalador del destino los regenere en su propio venv.
 
 ## Arquitectura
 
@@ -107,14 +149,18 @@ docker compose run --rm web pytest tests/test_auth.py # Ejecutar un test especí
 │              │   Services     │                      │
 │              │ auth, agent,   │                      │
 │              │ chat, session, │                      │
-│              │ run, oauth,    │                      │
+│              │ run, codex,    │                      │
 │              │ scheduler,     │                      │
 │              │ metrics, matrix│                      │
+│              │ review, creds, │                      │
+│              │ packages,      │                      │
+│              │ bundle, patches│                      │
 │              └───────┬────────┘                      │
 │                      │                               │
 │  ┌───────────────────▼────────────────────────────┐  │
 │  │              Agent Runtime                     │  │
 │  │  context_builder → model_client → tool_exec    │  │
+│  │  context_budget  ─── lazy manifest ──┐         │  │
 │  │       ▲                              │         │  │
 │  │       │         agent_runner          │         │  │
 │  │       └──────── (loop) ◄─────────────┘         │  │
@@ -124,13 +170,15 @@ docker compose run --rm web pytest tests/test_auth.py # Ejecutar un test especí
 │         │    Workspace Manager      │                │
 │         │  SOUL.md  AGENTS.md       │                │
 │         │  MEMORY.md  TOOLS.md      │                │
+│         │  HEARTBEAT.md PACKAGES.md │                │
 │         │  skills/ tools/ agents/   │                │
+│         │  .venv/ (per-workspace)   │                │
 │         └───────────────────────────┘                │
 └─────────────────────────────────────────────────────┘
           │                    │
     ┌─────▼─────┐      ┌──────▼──────┐
     │PostgreSQL │      │    Redis    │
-    │  8 tablas │      │ cache/broker│
+    │           │      │ cache/broker│
     └───────────┘      └─────────────┘
 ┌─────────────────────────────────────────────────────┐
 │                 Worker Service                       │
@@ -145,29 +193,32 @@ docker compose run --rm web pytest tests/test_auth.py # Ejecutar un test especí
 
 ```
 app/
-├── __init__.py          # App factory + CLI commands (create-admin, onboard)
+├── __init__.py          # App factory + CLI commands (onboard, codex-*, setup-*, export/import-bundle…)
 ├── config.py            # Configuración por entorno
 ├── extensions.py        # SQLAlchemy, Flask-Login, Bcrypt, CSRF
 ├── logging_config.py    # JSON logging estructurado a stdout
-├── models/              # SQLAlchemy: User, Agent, Session, Message, Run, ToolExecution, OAuthProfile, ScheduledTask, Skill, Tool, PatchProposal
-├── api/                 # Blueprints REST: auth, agents, chat (SSE), runs, oauth, scheduler, metrics, skills, tools, subagents, patches
+├── models/              # SQLAlchemy — ver sección "Modelo de datos"
+├── api/                 # Blueprints REST: auth, agents, chat (SSE), runs, scheduler, metrics, skills, tools, subagents, patches, credentials, packages
 │   ├── middleware.py    # Decoradores auth_required, admin_required
-│   └── errors.py       # Manejadores de error JSON
-├── dashboard/           # Vistas HTMX: overview, agents, chat, scheduler, metrics, skills, tools, topology, subagents, patches
-├── services/            # Lógica de negocio: auth, agent, session, chat, run, oauth, scheduler, metrics, matrix, skill, tool, subagent, patch, security_policy
+│   └── errors.py        # Manejadores de error JSON
+├── dashboard/           # Vistas HTMX: overview, agents, chat, scheduler, metrics, skills, tools, topology, subagents, patches, credentials, packages, heartbeat
+├── services/            # Lógica de negocio: auth, agent, session, chat, run, codex_auth, scheduler, metrics, matrix, skill, tool, subagent, patch, security_policy, credential, package, venv_manager, review, bundle
 ├── runtime/             # Motor del agente
-│   ├── context_builder.py  # Ensambla system prompt desde workspace + historial
-│   ├── model_client.py     # Wrapper OpenAI SDK con streaming
-│   ├── tool_registry.py    # Registro de tools (built-in + dinámicas)
-│   ├── tool_executor.py    # Ejecuta tools y registra en BD
-│   └── agent_runner.py     # Loop de razonamiento (máx 10 rondas de tool calls)
+│   ├── context_builder.py  # Ensambla system prompt + historial con budget de tokens
+│   ├── context_budget.py   # Token counting (tiktoken cl100k_base) + drop-oldest trimming
+│   ├── action_heuristics.py# Detecta promesas sin acción ("voy a…") para re-prompting
+│   ├── model_client.py     # Wrapper Codex con streaming
+│   ├── tool_registry.py    # Registro de tools built-in + cache per-run de lecturas
+│   ├── tool_executor.py    # Ejecuta tools y persiste en tool_executions
+│   └── agent_runner.py     # Loop de razonamiento (máx 10 rondas, cap de 20K chars por tool result)
 ├── workspace/           # Gestión de ficheros de workspace por agente
-│   ├── manager.py       # CRUD de ficheros, scaffolding
-│   ├── loader.py        # Carga SOUL/AGENTS/MEMORY/TOOLS.md
+│   ├── manager.py       # CRUD de ficheros, scaffolding, refresh TOOLS.md
+│   ├── loader.py        # Carga SOUL/MEMORY/PACKAGES (AGENTS y TOOLS van al manifest lazy)
 │   ├── discovery.py     # Descubrimiento de skills/tools, sync con BD, carga dinámica
 │   └── manifest.py      # Validación de manifiestos JSON
 ├── templates/           # Jinja2 + HTMX
-└── static/              # CSS + JS (chat.js para SSE)
+└── static/              # CSS + JS (chat.js con SSE + markdown + context meter)
+    └── vendor/          # marked.min.js, purify.min.js, htmx.min.js (servidos en local)
 
 worker.py                # Entry point del worker (scheduler + Matrix)
 app/worker/
@@ -179,59 +230,122 @@ app/worker/
 
 | Tabla | Descripción |
 |---|---|
-| `users` | Administradores del dashboard |
-| `agents` | Agentes con su workspace, modelo y perfil OAuth |
+| `users` | Administradores del dashboard (con MFA TOTP opcional) |
+| `agents` | Agentes con slug, workspace, modelo, parent_agent_id, review_effort y review_token_budget_daily |
 | `sessions` | Sesiones de chat por canal (web, matrix) |
 | `messages` | Historial de mensajes por sesión |
-| `runs` | Ejecuciones del agente con métricas (tokens, coste, duración) |
-| `tool_executions` | Registro de cada invocación de tool |
-| `oauth_profiles` | Perfiles OAuth con tokens cifrados (Fernet) |
+| `runs` | Ejecuciones del agente con métricas (tokens, coste, duración, trigger_type) |
+| `tool_executions` | Registro de cada invocación de tool (incluido output completo) |
 | `scheduled_tasks` | Tareas programadas (cron, heartbeat, one-shot) |
 | `skills` | Skills registradas por agente (manifest, estado, fuente) |
-| `tools` | Tools del workspace por agente (manifest, handler, timeout) |
+| `tools` | Tools de workspace por agente (manifest, path, timeout) |
 | `patch_proposals` | Propuestas de automejora con diff, snapshot, nivel de seguridad y estado |
 | `objectives` | Objetivos de trabajo del agente (goal-oriented, multi-run) |
 | `heartbeat_events` | Registro de cada tick del supervisor (decisión, razón, snapshot) |
+| `credentials` | Secretos cifrados con Fernet (API keys, user/password) — globales o por agente |
+| `package_installations` | Packages Python por workspace con estado (pending_review / installing / installed / failed / rejected) |
+| `approval_rules` | Reglas de aprobación automática para patches/packages (por agente, tipo y patrón) |
+| `review_events` | Eventos auditados por el reviewer: qué revisó, qué dijo, tokens consumidos |
+| `codex_quota_snapshots` | Snapshot histórico de cuotas/rate-limits devueltos por la API de Codex |
 
 ### Runtime del agente
 
 El flujo de una interacción por chat:
 
-1. El usuario envía un mensaje via `POST /api/chat`
-2. Se crea/recupera una sesión y se persiste el mensaje
-3. Se crea un registro Run para métricas
-4. El `agent_runner` construye el contexto:
-   - System prompt: `SOUL.md` + `TOOLS.md` + `AGENTS.md` + `MEMORY.md`
-   - Historial de mensajes recientes
-   - Mensaje del usuario
-5. Se invoca el modelo con streaming via OpenAI SDK
-6. Si el modelo pide tool calls, se ejecutan y se vuelve al paso 5 (máx 10 rondas)
-7. Los tokens se emiten como SSE (`text/event-stream`) al cliente
-8. Se persiste la respuesta y se finaliza el Run con métricas
+1. El usuario envía un mensaje vía `POST /api/chat`.
+2. Se crea/recupera la sesión y se persiste el mensaje.
+3. Se crea un registro `Run` para métricas.
+4. `context_builder` ensambla el contexto:
+   - **Baseline de seguridad** (política plataforma) + `TOOL_PROTOCOL` (acción-first).
+   - `SOUL.md`, `MEMORY.md`, `PACKAGES.md`, live roster de sub-agentes y pending review items.
+   - **Workspace index (lazy)**: `TOOLS.md`, `AGENTS.md` y cada `SKILL.md` **NO** se inlinean — se listan con su path y descripción. El agente los lee bajo demanda con `read_workspace_file`.
+   - Historial de mensajes pakado newest-first hasta llenar el token budget (`MAX_CONTEXT_TOKENS` − `CONTEXT_RESPONSE_RESERVE_TOKENS`). El mensaje del usuario y el system prompt siempre se preservan.
+5. `agent_runner` invoca al modelo con streaming; tokens emitidos como SSE.
+6. Si hay tool calls se ejecutan y se vuelve al paso 5 (máx 10 rondas). Resultados > 20 KB se truncan en el contexto pero se guardan enteros en `tool_executions`. Mismo fichero leído dos veces en un run devuelve un stub cacheado.
+7. Detección anti-"voy a hacerlo pero no lo hago": si el agente promete sin llamar tool y la petición era accionable, se re-inyecta una nudge-system y se reintenta una vez.
+8. Se persiste la respuesta final y el `Run` se cierra con métricas.
+
+### Gestión de contexto
+
+El budget de tokens (`MAX_CONTEXT_TOKENS` − `CONTEXT_RESPONSE_RESERVE_TOKENS`) se calcula con
+`tiktoken` (cl100k_base) y se aplica en cada turno:
+
+- El system prompt y el mensaje del usuario actual son intocables.
+- El historial se packea newest-first; los mensajes más antiguos que no caben se descartan.
+- Los ficheros grandes del workspace (`TOOLS.md`, `AGENTS.md`, cada `SKILL.md`) se sirven por manifest, no inline.
+- El chat muestra un **indicador de uso de contexto** (barra verde/ámbar/rojo) debajo del input con `input_tokens / budget` del último turno.
+- `GET /api/chat/context?agent_id=…[&session_id=…]` devuelve `{total_tokens, budget, pct, message_count}` para refrescar el indicador desde UI.
+
+### Chat con Markdown
+
+Las respuestas del asistente se renderizan con `marked` + `DOMPurify` (vendored bajo
+`app/static/vendor/`). El toggle "Hide tool" persiste en `localStorage`. Los tokens se acumulan en
+un buffer y se re-renderizan en cada chunk SSE sin flicker.
 
 ### Tools built-in
 
+Todos disponibles vía tool calls del modelo. Las descripciones concretas y parámetros están en
+`app/runtime/tool_registry.py`.
+
 | Tool | Descripción |
 |---|---|
-| `read_workspace_file` | Lee un fichero del workspace del agente |
+| `read_workspace_file` | Lee un fichero del workspace. Lecturas repetidas en el mismo run devuelven stub |
 | `list_workspace_files` | Lista todos los ficheros del workspace |
 | `get_current_time` | Devuelve fecha y hora UTC actual |
-| `delegate_task` | Delega una tarea a un sub-agente y devuelve el resultado |
-| `list_subagents` | Lista los sub-agentes disponibles para delegación |
-| `propose_change` | Propone un cambio a un fichero del workspace (auto-aplica L1, espera aprobación L2, rechaza L3) |
-| `list_patches` | Lista propuestas de cambio recientes del agente |
+| `fetch_url` | GET/POST HTTP con headers, body y timeout; fallback cuando no hay tool específico |
+| `delegate_task` | Delega a un sub-agente por slug o nombre; devuelve la respuesta |
+| `list_subagents` | Lista los sub-agentes activos del agente actual |
+| `create_skill` | Crea un skill completo (SKILL.md + handler) en una sola llamada |
+| `create_tool` | Crea un tool de workspace (manifest + tool.py) |
+| `propose_change` | Propone un cambio de fichero; L1 auto-aplica, L2 espera aprobación, L3 rechaza |
+| `list_patches` | Lista propuestas recientes del agente |
+| `schedule_task` | Crea una tarea cron para este agente (`schedule_expr`, `message`) |
+| `list_scheduled_tasks` | Lista tareas programadas del agente |
+| `cancel_scheduled_task` | Cancela una tarea programada por id |
+| `get_credential` | Resuelve una credencial por nombre: DB agent-scoped → DB global → `AUTOBOT_CRED_<NAME>` |
+| `list_credentials` | Lista nombres y metadata (sin valores) |
+| `set_credential` | Crea o reemplaza una credencial agent-scoped |
+| `delete_credential` | Borra una credencial agent-scoped |
+| `install_package` | Solicita un package PyPI para el venv del workspace (auto-install si está allowlisted) |
+| `list_packages` | Lista el historial de instalaciones del agente con estado |
+
+### Credenciales
+
+Almacén cifrado con Fernet en la tabla `credentials`, gestionado desde el dashboard y accesible
+por los agentes vía `get_credential`.
+
+- Scope: `agent_id IS NULL` = global; `agent_id` = sólo ese agente (shadowa a la global con el mismo nombre).
+- Tipos: `token` (valor único) y `user_password` (username + password).
+- Fallback `AUTOBOT_CRED_<UPPER(NAME)>`: permite preseeded de credenciales por `.env`; devuelve `source="env"` al consultarse.
+- Los valores sólo aparecen en claro cuando el admin pulsa "Reveal" en la UI o cuando el agente llama a `get_credential`. Nunca se serializan en las respuestas de listado.
+
+### Packages por workspace
+
+Cada workspace tiene un venv aislado en `<workspace>/.venv`. El agente solicita instalaciones con
+`install_package`:
+
+- Si el spec normalizado está en `PACKAGE_ALLOWLIST` → auto-install.
+- Si no → fila en `pending_review`, el admin aprueba/rechaza desde el dashboard.
+- Estados: `pending_review` → `approved` → `installing` → `installed` / `failed` / `rejected`.
+- `VENV_BASE_PACKAGES` se instala en cada venv nuevo para tener un kit base.
 
 ### Workspace de agente
 
 Cada agente tiene un directorio en `/workspaces/<slug>/`:
 
-| Fichero | Propósito | Frecuencia de cambio |
+| Fichero / dir | Propósito | Frecuencia de cambio |
 |---|---|---|
 | `SOUL.md` | Identidad, estilo, principios, límites | Rara vez |
-| `AGENTS.md` | Catálogo de agentes/subagentes | Al crear/modificar agentes |
+| `AGENTS.md` | Catálogo de agentes/subagentes (lazy-loaded) | Al crear/modificar agentes |
 | `MEMORY.md` | Memoria persistente resumida | Consolidación periódica |
-| `TOOLS.md` | Inventario de tools disponibles | Al registrar tools |
+| `TOOLS.md` | Inventario de tools disponibles (lazy-loaded) | Regenerado al registrar tools |
 | `HEARTBEAT.md` | Checklist declarativa que lee el supervisor cada tick | Editable por el usuario |
+| `PACKAGES.md` | Packages instalados en el venv del workspace | Automático |
+| `skills/` | SKILL.md y handler por skill | Creados con `create_skill` |
+| `tools/` | Manifest y tool.py por tool | Creados con `create_tool` |
+| `patches/` | Snapshots pre/post de patches aplicados | Automático |
+| `runs/` | Logs de ejecuciones (excluido de exports) | Automático |
+| `.venv/` | Entorno Python aislado (excluido de exports) | Regenerado al importar |
 
 ### Heartbeat supervisor
 
@@ -267,10 +381,19 @@ entre interacciones. Estados: `active`, `blocked`, `waiting`, `done`,
 `cancelled`. El supervisor sólo considera los `active` cuyo `next_check_at`
 haya vencido (o sea `NULL`). Se gestionan desde `/agents/<id>/heartbeat`.
 
+### Reviewer y review gating
+
+Cada agente puede tener un sub-agente de tipo `reviewer` (creado por `setup-default-agents`). Los
+puntos de auditoría se activan por `review_effort` (0 = off, 10 = auditoría total). Cuando `create_skill`,
+`create_tool` o `schedule_task` ejecutan, la respuesta puede llevar un campo `review` con el
+feedback del reviewer. `review_token_budget_daily` limita el gasto diario en auditorías por agente
+(cuando se supera, el review_gate se cierra hasta el siguiente día UTC). Todo queda auditado en
+`review_events`.
+
 ## API
 
 ### Auth
-- `POST /api/auth/login` — Login con email/password
+- `POST /api/auth/login` — Login con email/password (+ TOTP si está activado)
 - `POST /api/auth/logout` — Cerrar sesión
 - `GET /api/auth/me` — Usuario actual
 
@@ -284,18 +407,14 @@ haya vencido (o sea `NULL`). Se gestionan desde `/agents/<id>/heartbeat`.
 
 ### Chat
 - `POST /api/chat` — Enviar mensaje, respuesta SSE (`{"agent_id": 1, "message": "hola"}`)
+- `GET /api/chat/context?agent_id=…[&session_id=…]` — Tamaño del contexto del próximo turno
+- `GET /api/chat/history?agent_id=…` — Historial de la sesión activa
 - `GET /api/sessions` — Listar sesiones
 - `GET /api/sessions/:id/messages` — Mensajes de una sesión
 
 ### Runs
 - `GET /api/runs` — Listar ejecuciones (paginado, filtrable por `agent_id`)
 - `GET /api/runs/:id` — Detalle de ejecución
-
-### OAuth
-- `GET /api/oauth/openai/start` — Iniciar flujo OAuth
-- `GET /api/oauth/openai/callback` — Callback OAuth
-- `POST /api/oauth/openai/refresh` — Refrescar tokens
-- `GET /api/oauth/profiles` — Listar perfiles OAuth
 
 ### Scheduled Tasks
 - `GET /api/scheduled-tasks` — Listar tareas (filtrable por `agent_id`)
@@ -322,14 +441,14 @@ haya vencido (o sea `NULL`). Se gestionan desde `/agents/<id>/heartbeat`.
 
 ### Sub-agents
 - `GET /api/agents/:id/subagents` — Listar sub-agentes de un agente
-- `POST /api/agents/:id/subagents` — Crear sub-agente (`{"name": "...", "role": "..."}`)
-- `POST /api/agents/:id/delegate` — Delegar tarea (`{"target_agent_id": 2, "message": "..."}` o `{"target_name": "slug", "message": "..."}`)
+- `POST /api/agents/:id/subagents` — Crear sub-agente
+- `POST /api/agents/:id/delegate` — Delegar tarea
 - `GET /api/agents/topology` — Árbol completo de topología de agentes
 - `GET /api/agents/:id/topology` — Subárbol desde un agente
 
 ### Skills
 - `GET /api/skills` — Listar skills (filtrable por `agent_id`)
-- `POST /api/skills` — Crear skill (`{"agent_id": 1, "name": "..."}`)
+- `POST /api/skills` — Crear skill
 - `PATCH /api/skills/:id` — Actualizar
 - `POST /api/skills/:id/reload` — Recargar manifest desde filesystem
 - `POST /api/skills/:id/toggle` — Activar/desactivar
@@ -337,11 +456,24 @@ haya vencido (o sea `NULL`). Se gestionan desde `/agents/<id>/heartbeat`.
 
 ### Tools (workspace)
 - `GET /api/tools` — Listar tools (filtrable por `agent_id`)
-- `POST /api/tools` — Crear tool (`{"agent_id": 1, "name": "..."}`)
+- `POST /api/tools` — Crear tool
 - `PATCH /api/tools/:id` — Actualizar
 - `POST /api/tools/:id/toggle` — Activar/desactivar
 - `POST /api/tools/:id/test` — Ejecutar tool con input de prueba
 - `POST /api/tools/sync` — Sincronizar tools del workspace con BD
+
+### Credenciales
+- `GET /api/credentials` — Listar (metadata + preview redactado)
+- `POST /api/credentials` — Crear credencial
+- `PATCH /api/credentials/:id` — Actualizar
+- `DELETE /api/credentials/:id` — Borrar
+- `GET /api/credentials/:id/reveal` — Ver valor en claro (requiere admin)
+
+### Packages
+- `GET /api/packages` — Listar instalaciones (filtrable por `agent_id`, `status`)
+- `POST /api/packages/:id/approve` — Aprobar y lanzar instalación
+- `POST /api/packages/:id/reject` — Rechazar
+- `POST /api/packages/:id/retry` — Re-intentar una instalación fallida
 
 ### Metrics
 - `GET /api/metrics/runs-per-day` — Ejecuciones por día
@@ -361,9 +493,14 @@ haya vencido (o sea `NULL`). Se gestionan desde `/agents/<id>/heartbeat`.
 
 ## Roadmap
 
-- [x] **Fase 1 — Núcleo**: Flask, PostgreSQL, auth, chat SSE, runtime, workspace, OAuth
-- [x] **Fase 2 — Canales y Scheduler**: Matrix, heartbeat, cron, métricas completas, worker service
-- [x] **Fase 3 — Skills y Tools**: modelos Skill/Tool, registro dinámico, descubrimiento desde workspace, validación de manifiestos, carga dinámica de handlers, integración con runtime, panel dashboard
-- [x] **Fase 4 — Multiagente**: creación de sub-agentes, herencia de OAuth, delegación de tareas (síncrona), tools delegate_task/list_subagents, topología en dashboard, trazabilidad parent_run_id
-- [x] **Fase 5 — Automejora**: modelo PatchProposal, motor de política de seguridad (L1/L2/L3), servicio de patches con diff unificado, snapshots y rollback, tools `propose_change`/`list_patches`, API y dashboard de aprobación
-- [ ] **Fase 6 — Hardening**: sandbox, observabilidad avanzada, límites finos
+- [x] **Fase 1 — Núcleo**: Flask, PostgreSQL, auth, chat SSE, runtime, workspace, Codex OAuth (PKCE CLI)
+- [x] **Fase 2 — Canales y Scheduler**: Matrix, heartbeat, cron, métricas, worker service
+- [x] **Fase 3 — Skills y Tools**: registro dinámico, descubrimiento desde workspace, validación, carga dinámica, panel dashboard
+- [x] **Fase 4 — Multiagente**: sub-agentes, herencia de OAuth, delegación síncrona, tools `delegate_task` / `list_subagents`, topología, trazabilidad `parent_run_id`
+- [x] **Fase 5 — Automejora**: `PatchProposal`, política de seguridad L1/L2/L3, diff unificado, snapshots + rollback, review-gating con sub-agente reviewer
+- [x] **Credenciales**: store cifrado Fernet, scopes global/agente, fallback env, tools `get/set/list/delete_credential`
+- [x] **Packages por workspace**: venv aislado, allowlist, aprobación en dashboard, tools `install_package` / `list_packages`
+- [x] **Gestión de contexto**: token budget con `tiktoken`, drop-oldest, workspace index lazy-loaded, indicador de uso en chat
+- [x] **Chat markdown**: render seguro con marked + DOMPurify
+- [x] **Portabilidad**: `flask export-bundle` / `flask import-bundle` para clonar una instalación entera
+- [ ] **Fase 6 — Hardening**: sandbox de ejecución, observabilidad avanzada, límites finos de coste por agente, rotación de credenciales

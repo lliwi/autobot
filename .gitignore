@@ -20,3 +20,4 @@ workspaces/
 *.pyc
 .venv/
 venv/
+backups/
