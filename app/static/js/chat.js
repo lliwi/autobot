@@ -53,6 +53,22 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
+    if (window.marked && marked.setOptions) {
+        marked.setOptions({ breaks: true, gfm: true });
+    }
+
+    function renderMarkdown(text) {
+        if (!text) return '';
+        if (!window.marked || !window.DOMPurify) {
+            return escapeHtml(text);
+        }
+        try {
+            return DOMPurify.sanitize(marked.parse(text));
+        } catch (_) {
+            return escapeHtml(text);
+        }
+    }
+
     function labelFor(role) {
         if (role === 'assistant') return currentAgentName || 'assistant';
         return role;
@@ -166,7 +182,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 break;
 
             case 'token':
-                contentSpan.textContent += chunk.data;
+                contentSpan.dataset.raw = (contentSpan.dataset.raw || '') + chunk.data;
+                contentSpan.innerHTML = renderMarkdown(contentSpan.dataset.raw);
                 scrollToBottom();
                 break;
 
@@ -198,10 +215,20 @@ document.addEventListener('DOMContentLoaded', () => {
         const div = document.createElement('div');
         div.className = `chat-msg chat-msg-${role}`;
         const displayLabel = label || role;
+        const useMarkdown = role === 'user' || role === 'assistant';
+        const contentHtml = useMarkdown ? renderMarkdown(content) : escapeHtml(content);
+        const contentClass = useMarkdown ? 'chat-msg-content md' : 'chat-msg-content';
         div.innerHTML = `
             <div class="chat-msg-role">${escapeHtml(displayLabel)}</div>
-            <div class="chat-msg-content">${escapeHtml(content)}</div>
+            <div class="${contentClass}"></div>
         `;
+        const contentEl = div.querySelector('.chat-msg-content');
+        if (useMarkdown) {
+            contentEl.dataset.raw = content || '';
+            contentEl.innerHTML = contentHtml;
+        } else {
+            contentEl.textContent = content || '';
+        }
         messagesDiv.appendChild(div);
         scrollToBottom();
         return div;

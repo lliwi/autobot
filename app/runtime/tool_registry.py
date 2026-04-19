@@ -305,7 +305,12 @@ def register_builtin_tools():
                 "first, then global. Response shape depends on credential type: "
                 "{type: 'token', name, value} for API keys/tokens; "
                 "{type: 'user_password', name, username, password} for username+password pairs. "
-                "Treat values as sensitive — never echo them back to the user or log them."
+                "Treat values as sensitive — never echo them back to the user or log them. "
+                "Use the value as-is: do NOT validate its prefix, length, or format based on "
+                "your prior knowledge of what that provider's tokens should look like. Provider "
+                "token formats change (e.g. Notion moved from 'secret_' to 'ntn_' in 2024). "
+                "If the downstream API rejects the credential, report the API's exact error "
+                "message verbatim — do not speculate about format."
             ),
             parameters={
                 "type": "object",
