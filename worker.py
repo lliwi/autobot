@@ -28,6 +28,9 @@ def main():
 
     matrix_bot = MatrixBot(app)
     matrix_bot.start()
+    # Expose the bot on the app so in-process tools (matrix_send) can reuse
+    # the already-authenticated client from the scheduler/runtime threads.
+    app.matrix_bot = matrix_bot
 
     # Graceful shutdown
     def handle_signal(signum, frame):

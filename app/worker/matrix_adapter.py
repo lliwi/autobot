@@ -11,6 +11,14 @@ class MatrixBot:
         self.app = app
         self._thread = None
         self._running = False
+        # Populated once the bot's event loop is up. Used by send_dm to
+        # schedule outbound sends from other threads (e.g. the scheduler
+        # worker running an agent cron task).
+        self._loop = None
+        self._client = None
+        # Resolves only after login succeeds, so send_dm can block briefly
+        # at startup instead of failing with "bot not ready".
+        self._ready = threading.Event()
 
     def start(self):
         """Start the Matrix bot in a daemon thread."""
@@ -36,6 +44,7 @@ class MatrixBot:
         """Run the async Matrix client in its own event loop."""
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
+        self._loop = loop
         try:
             loop.run_until_complete(self._async_main())
         except Exception as e:
@@ -51,6 +60,7 @@ class MatrixBot:
         password = self.app.config["MATRIX_PASSWORD"]
 
         client = AsyncClient(homeserver, user_id)
+        self._client = client
 
         # Login
         retry_delay = 1
@@ -59,6 +69,7 @@ class MatrixBot:
                 response = await client.login(password)
                 if isinstance(response, LoginResponse):
                     logger.info(f"Matrix logged in as {user_id}")
+                    self._ready.set()
                     break
                 else:
                     logger.error(f"Matrix login failed: {response}")
@@ -213,3 +224,71 @@ class MatrixBot:
                     )
                 except Exception as e:
                     logger.error(f"Failed to send Matrix response: {e}")
+
+    def send_dm(self, user_id: str, body: str, timeout: float = 30.0) -> dict:
+        """Send a DM to ``user_id``. Safe to call from any thread.
+
+        Finds an existing 1:1 room with ``user_id`` or creates a new one, then
+        sends ``body`` as a plain text message. Returns ``{"ok": bool, ...}``.
+        The caller (agent tool handler) is synchronous, so we marshal the
+        coroutine onto the bot's own event loop via ``run_coroutine_threadsafe``.
+        """
+        if not self._running or self._loop is None:
+            return {"ok": False, "error": "Matrix bot not running (check MATRIX_* env vars)"}
+        # Wait briefly for login if the bot just started.
+        if not self._ready.wait(timeout=10):
+            return {"ok": False, "error": "Matrix bot not logged in yet"}
+
+        future = asyncio.run_coroutine_threadsafe(
+            self._send_dm_async(user_id, body), self._loop,
+        )
+        try:
+            return future.result(timeout=timeout)
+        except Exception as e:
+            logger.exception("send_dm failed")
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    async def _send_dm_async(self, user_id: str, body: str) -> dict:
+        """Resolve a DM room with ``user_id`` and post ``body`` into it."""
+        client = self._client
+        if client is None:
+            return {"ok": False, "error": "Matrix client not initialised"}
+
+        room_id = self._find_dm_room(client, user_id)
+        if room_id is None:
+            room_id = await self._create_dm_room(client, user_id)
+            if room_id is None:
+                return {"ok": False, "error": f"could not create DM room with {user_id}"}
+
+        from nio import RoomSendResponse
+
+        resp = await client.room_send(
+            room_id=room_id,
+            message_type="m.room.message",
+            content={"msgtype": "m.text", "body": body},
+        )
+        if isinstance(resp, RoomSendResponse):
+            return {"ok": True, "room_id": room_id, "event_id": resp.event_id}
+        return {"ok": False, "error": f"room_send failed: {resp}"}
+
+    def _find_dm_room(self, client, user_id: str) -> str | None:
+        """Return an existing 2-person room we share with ``user_id``, or None."""
+        target = user_id.strip()
+        for room_id, room in client.rooms.items():
+            members = getattr(room, "users", {}) or {}
+            if len(members) == 2 and target in members:
+                return room_id
+        return None
+
+    async def _create_dm_room(self, client, user_id: str) -> str | None:
+        from nio import RoomCreateResponse
+
+        resp = await client.room_create(
+            is_direct=True,
+            invite=[user_id],
+            preset="trusted_private_chat",
+        )
+        if isinstance(resp, RoomCreateResponse):
+            return resp.room_id
+        logger.error(f"Failed to create DM room with {user_id}: {resp}")
+        return None

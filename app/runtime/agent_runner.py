@@ -6,7 +6,11 @@ from app.runtime.action_heuristics import is_task_like, looks_like_promise
 from app.runtime.context_builder import build_context
 from app.runtime.model_client import stream_chat_completion
 from app.runtime.tool_executor import execute as execute_tool
-MAX_TOOL_ROUNDS = 10
+
+# Default hard cap on tool-call rounds. Overridden by ``Config.MAX_TOOL_ROUNDS``
+# (env ``MAX_TOOL_ROUNDS``) at runtime; individual agents can override that via
+# the ``max_tool_rounds`` column on the ``agents`` table.
+DEFAULT_MAX_TOOL_ROUNDS = 20
 
 # Per-call cap on what goes back into the *model's* message stream. The full
 # tool output is still persisted in ``tool_executions`` — this only trims
@@ -75,8 +79,15 @@ def run(agent, session, user_message, run_id):
     user_wants_action = is_task_like(user_message)
     action_nudge_used = False
 
+    # Per-agent override beats the global env knob beats the module default.
+    max_rounds = (
+        getattr(agent, "max_tool_rounds", None)
+        or current_app.config.get("MAX_TOOL_ROUNDS")
+        or DEFAULT_MAX_TOOL_ROUNDS
+    )
+
     try:
-        for round_num in range(MAX_TOOL_ROUNDS):
+        for round_num in range(max_rounds):
             full_response = ""
             tool_calls = None
 

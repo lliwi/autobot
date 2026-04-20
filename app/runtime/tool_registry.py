@@ -433,6 +433,35 @@ def register_builtin_tools():
         )
     )
 
+    register(
+        ToolDefinition(
+            name="matrix_send",
+            description=(
+                "Send a direct message to a Matrix user via the bot that already runs "
+                "in this process (reuses its login — no extra credentials needed). "
+                "Use this to proactively deliver results from cron/heartbeat tasks to "
+                "a user outside of an ongoing conversation. The target must be a full "
+                "Matrix ID like '@alice:example.org'. The bot will open a DM room if "
+                "one does not already exist."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "user_id": {
+                        "type": "string",
+                        "description": "Full Matrix ID, e.g. '@alice:example.org'.",
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Plain-text body of the message to send.",
+                    },
+                },
+                "required": ["user_id", "message"],
+            },
+            handler=lambda **kwargs: _matrix_send(**kwargs),
+        )
+    )
+
 
 # Per-run cache of files already served by ``read_workspace_file``. Lets us
 # return a cheap stub on the second read within the same turn instead of
@@ -986,3 +1015,31 @@ def _delete_credential(_agent=None, name=None, **kwargs):
         return {"error": f"Credential '{name}' not found for this agent (global credentials are admin-only)."}
     delete_credential(row.id)
     return {"name": name, "message": "Credential deleted."}
+
+
+def _matrix_send(_agent=None, user_id=None, message=None, **kwargs):
+    """Send a DM through the MatrixBot exposed by the worker process.
+
+    Only works inside the worker (where MatrixBot runs). If called from the
+    web process — where ``app.matrix_bot`` isn't set — this returns an error
+    rather than silently doing nothing.
+    """
+    if not user_id:
+        return {"error": "Missing required argument 'user_id' (e.g. '@alice:example.org')."}
+    if not message:
+        return {"error": "Missing required argument 'message'."}
+    if not isinstance(user_id, str) or not user_id.startswith("@") or ":" not in user_id:
+        return {"error": f"Invalid Matrix ID '{user_id}'. Expected '@user:server'."}
+
+    from flask import current_app
+
+    bot = getattr(current_app, "matrix_bot", None)
+    if bot is None:
+        return {
+            "error": (
+                "Matrix bot not available in this process. "
+                "This tool only works from the worker (scheduled tasks, heartbeat, "
+                "matrix messages) — not the web chat."
+            )
+        }
+    return bot.send_dm(user_id, message)

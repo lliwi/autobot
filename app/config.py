@@ -33,6 +33,10 @@ class Config:
     # value or ignore entirely. Left in config so older deployments don't
     # blow up on missing key.
     MAX_HISTORY_MESSAGES = int(os.environ.get("MAX_HISTORY_MESSAGES", "50"))
+    # Hard cap on tool-call rounds per run. Prevents runaway loops when the
+    # model keeps calling tools without converging. Individual agents can
+    # override this via the ``max_tool_rounds`` column.
+    MAX_TOOL_ROUNDS = int(os.environ.get("MAX_TOOL_ROUNDS", "20"))
 
     # Matrix
     MATRIX_HOMESERVER = os.environ.get("MATRIX_HOMESERVER", "")

@@ -22,6 +22,9 @@ class Agent(db.Model):
     # Enforced in review_service.should_review — when today's consumption
     # reaches the cap the gate closes for the rest of the UTC day.
     review_token_budget_daily = db.Column(db.Integer, nullable=True)
+    # Hard cap on tool-call rounds in a single run. Prevents runaway loops.
+    # None falls back to agent_runner.DEFAULT_MAX_TOOL_ROUNDS.
+    max_tool_rounds = db.Column(db.Integer, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(
         db.DateTime,
@@ -48,6 +51,7 @@ class Agent(db.Model):
             "group_response_policy": self.group_response_policy,
             "review_effort": self.review_effort,
             "review_token_budget_daily": self.review_token_budget_daily,
+            "max_tool_rounds": self.max_tool_rounds,
             "children_count": len(self.children) if self.children else 0,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
