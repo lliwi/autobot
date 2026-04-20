@@ -1,0 +1,33 @@
+<p class="logs-count">{{ entries|length }} record{{ '' if entries|length == 1 else 's' }} shown.</p>
+
+{% if entries %}
+<table class="logs-table">
+    <thead>
+        <tr>
+            <th>Time</th>
+            <th>Level</th>
+            <th>Process</th>
+            <th>Logger</th>
+            <th>Message</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for e in entries %}
+        <tr>
+            <td class="time">{{ e.timestamp | localtz }}</td>
+            <td class="lvl"><span class="level-badge level-{{ (e.level or 'INFO')|upper }}">{{ e.level or '—' }}</span></td>
+            <td class="proc">{{ e.process or '—' }}</td>
+            <td class="logger"><code>{{ e.logger or '—' }}</code></td>
+            <td class="msg">
+                {{ e.message or '' }}
+                {% if e.exception %}
+                <div class="logs-exception">{{ e.exception }}</div>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="logs-empty">No log records match the current filters.</div>
+{% endif %}

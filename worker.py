@@ -5,11 +5,16 @@ import signal
 import sys
 import time
 
+from app.logging_config import configure_worker_logging
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(name)s] %(levelname)s: %(message)s",
     stream=sys.stdout,
 )
+# Ship worker records to the shared Redis ring buffer so the dashboard
+# Logs view surfaces both web and worker output in one timeline.
+configure_worker_logging(process="worker")
 logger = logging.getLogger("worker")
 
 

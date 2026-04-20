@@ -1,0 +1,204 @@
+{% extends "base.html" %}
+
+{% block title %}Logs - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Logs</h1>
+    <div class="logs-meta">
+        <small>Ring buffer — up to {{ ring_max }} records shared across web + worker.</small>
+    </div>
+</div>
+
+{% if error %}
+<div class="flash flash-danger">{{ error }}</div>
+{% endif %}
+
+<form method="GET" action="{{ url_for('dashboard.logs') }}" class="logs-filters card">
+    <div class="filter-grid">
+        <div class="filter-field">
+            <label for="level">Min level</label>
+            <select id="level" name="level">
+                <option value="">Any</option>
+                {% for lv in levels %}
+                <option value="{{ lv }}" {% if lv == level %}selected{% endif %}>{{ lv }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <div class="filter-field">
+            <label for="process">Process</label>
+            <select id="process" name="process">
+                <option value="">Any</option>
+                <option value="web" {% if process == 'web' %}selected{% endif %}>web</option>
+                <option value="worker" {% if process == 'worker' %}selected{% endif %}>worker</option>
+            </select>
+        </div>
+        <div class="filter-field">
+            <label for="logger">Logger contains</label>
+            <input type="text" id="logger" name="logger" value="{{ logger_q }}" placeholder="app.runtime">
+        </div>
+        <div class="filter-field filter-field-grow">
+            <label for="q">Message contains</label>
+            <input type="text" id="q" name="q" value="{{ message_q }}" placeholder="error, timeout, matrix…">
+        </div>
+        <div class="filter-field">
+            <label for="limit">Limit</label>
+            <input type="number" id="limit" name="limit" min="1" max="2000" value="{{ limit }}">
+        </div>
+    </div>
+    <div class="filter-actions">
+        <button type="submit" class="btn btn-primary">Apply</button>
+        <a href="{{ url_for('dashboard.logs') }}" class="btn">Reset</a>
+        <label class="auto-refresh">
+            <input type="checkbox" id="auto-refresh"> Auto-refresh (5s)
+        </label>
+    </div>
+</form>
+
+<div id="logs-table-wrap">
+    {% include "dashboard/_logs_table.html" %}
+</div>
+
+<script>
+(function () {
+    var checkbox = document.getElementById('auto-refresh');
+    var wrap = document.getElementById('logs-table-wrap');
+    if (!checkbox || !wrap) return;
+    var timer = null;
+
+    function buildUrl() {
+        var params = new URLSearchParams(window.location.search);
+        params.set('partial', '1');
+        return "{{ url_for('dashboard.logs') }}" + "?" + params.toString();
+    }
+
+    function tick() {
+        fetch(buildUrl(), {credentials: 'same-origin'})
+            .then(function (r) { return r.text(); })
+            .then(function (html) { wrap.innerHTML = html; })
+            .catch(function () {});
+    }
+
+    function setState(on) {
+        if (timer) { clearInterval(timer); timer = null; }
+        if (on) {
+            timer = setInterval(tick, 5000);
+            try { localStorage.setItem('autobot-logs-autorefresh', '1'); } catch (e) {}
+        } else {
+            try { localStorage.setItem('autobot-logs-autorefresh', '0'); } catch (e) {}
+        }
+    }
+
+    try {
+        if (localStorage.getItem('autobot-logs-autorefresh') === '1') {
+            checkbox.checked = true;
+            setState(true);
+        }
+    } catch (e) {}
+
+    checkbox.addEventListener('change', function () { setState(checkbox.checked); });
+})();
+</script>
+
+<style>
+.logs-filters {
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: 8px;
+}
+.filter-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+    gap: 0.75rem 1rem;
+    margin-bottom: 0.75rem;
+}
+.filter-field { display: flex; flex-direction: column; gap: 0.25rem; }
+.filter-field-grow { grid-column: span 2; }
+.filter-field label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary, #6b7280);
+}
+.filter-field input, .filter-field select {
+    padding: 0.4rem 0.55rem;
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: 6px;
+    background: transparent;
+    color: inherit;
+    font-size: 0.9rem;
+}
+.filter-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+.auto-refresh {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    color: var(--text-secondary, #6b7280);
+}
+.logs-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+    table-layout: fixed;
+}
+.logs-table th, .logs-table td {
+    text-align: left;
+    padding: 0.45rem 0.6rem;
+    border-bottom: 1px solid var(--border, #e5e7eb);
+    vertical-align: top;
+}
+.logs-table th {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-secondary, #6b7280);
+}
+.logs-table td.msg {
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    word-break: break-word;
+    white-space: pre-wrap;
+}
+.logs-table td.time { white-space: nowrap; width: 12rem; }
+.logs-table td.proc { width: 4.5rem; }
+.logs-table td.logger { width: 18rem; word-break: break-all; }
+.logs-table td.lvl { width: 5rem; }
+.level-badge {
+    display: inline-block;
+    padding: 0.1rem 0.45rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    border-radius: 4px;
+    letter-spacing: 0.03em;
+}
+.level-DEBUG    { background: rgba(107,114,128,0.2); color: #9ca3af; }
+.level-INFO     { background: rgba(59,130,246,0.2); color: #60a5fa; }
+.level-WARNING  { background: rgba(245,158,11,0.2); color: #f59e0b; }
+.level-ERROR    { background: rgba(239,68,68,0.2);  color: #f87171; }
+.level-CRITICAL { background: #ef4444; color: #fff; }
+.logs-exception {
+    margin-top: 0.35rem;
+    padding: 0.45rem 0.6rem;
+    background: rgba(239,68,68,0.08);
+    border-left: 3px solid #ef4444;
+    font-size: 0.78rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+}
+.logs-empty {
+    padding: 1.25rem;
+    color: var(--text-secondary, #6b7280);
+    text-align: center;
+}
+.logs-count {
+    margin: 0.5rem 0;
+    font-size: 0.8rem;
+    color: var(--text-secondary, #6b7280);
+}
+</style>
+{% endblock %}
