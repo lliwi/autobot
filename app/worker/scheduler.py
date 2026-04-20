@@ -53,6 +53,7 @@ def shutdown_scheduler():
 def _sync_jobs(app):
     """Sync APScheduler jobs from database state."""
     with app.app_context():
+        from datetime import datetime as _dt
         from datetime import timezone as _tz
 
         from app.extensions import db
@@ -99,11 +100,14 @@ def _sync_jobs(app):
                         trigger=trigger,
                         kwargs={"app": app, "task_id": task.id},
                     )
-                    # Keep DB next_run_at aligned with APScheduler's computed
-                    # next fire time (which respects the task's timezone).
-                    job = _scheduler.get_job(job_id)
-                    if job and job.next_run_time:
-                        new_next = job.next_run_time.astimezone(_tz.utc).replace(tzinfo=None)
+                    # Keep DB next_run_at aligned with the trigger's next fire
+                    # time. Use the trigger directly rather than job.next_run_time
+                    # because the latter is only populated after the scheduler
+                    # starts, and _sync_jobs runs during init too.
+                    now = _dt.now(tz or _tz.utc)
+                    next_fire = trigger.get_next_fire_time(None, now)
+                    if next_fire is not None:
+                        new_next = next_fire.astimezone(_tz.utc).replace(tzinfo=None)
                         if task.next_run_at != new_next:
                             task.next_run_at = new_next
                             db.session.commit()
