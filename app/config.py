@@ -38,6 +38,13 @@ class Config:
     # override this via the ``max_tool_rounds`` column.
     MAX_TOOL_ROUNDS = int(os.environ.get("MAX_TOOL_ROUNDS", "20"))
 
+    # Self-improvement rate limit. Caps how many patches a single agent can
+    # produce per rolling hour, counting only states that consume budget
+    # (applied + pending_review). Rejected patches don't count — we don't want
+    # to punish an agent whose first try was syntactically broken. Set to 0 to
+    # disable the limit entirely.
+    PATCHES_PER_HOUR_PER_AGENT = int(os.environ.get("PATCHES_PER_HOUR_PER_AGENT", "30"))
+
     # Matrix
     MATRIX_HOMESERVER = os.environ.get("MATRIX_HOMESERVER", "")
     MATRIX_USER_ID = os.environ.get("MATRIX_USER_ID", "")

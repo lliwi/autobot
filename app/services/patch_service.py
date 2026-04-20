@@ -7,12 +7,15 @@ import difflib
 import json
 import logging
 import shutil
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+
+from flask import current_app
 
 from app.extensions import db
 from app.models.agent import Agent
 from app.models.patch_proposal import PatchProposal
+from app.services.patch_validator import validate_patch
 from app.services.security_policy import (
     can_auto_apply,
     classify_target,
@@ -76,6 +79,29 @@ def propose_change(agent_id, target_path, new_content, title, reason, run_id=Non
         logger.warning(f"Prohibited patch rejected: {target_path} (agent {agent_id})")
         return patch
 
+    # Rate limit: cap how many patches an agent can produce per rolling hour.
+    # Only "real" outcomes count (applied + pending_review). Rejected patches
+    # don't consume budget — the validator dropping a broken first attempt
+    # shouldn't block the retry.
+    rate_err = _rate_limit_check(agent_id)
+    if rate_err is not None:
+        patch = PatchProposal(
+            agent_id=agent_id,
+            run_id=run_id,
+            title=title,
+            reason=reason,
+            diff_text="",
+            target_path=target_path,
+            target_type=target_type,
+            security_level=level,
+            status="rejected",
+            test_result_json={"error": rate_err, "rate_limited": True},
+        )
+        db.session.add(patch)
+        db.session.commit()
+        logger.warning("Patch rate-limited for agent %s: %s", agent_id, rate_err)
+        return patch
+
     # Read current content and compute diff
     current_content = read_file(agent, target_path)
     diff = _compute_diff(target_path, current_content, new_content)
@@ -115,6 +141,31 @@ def propose_change(agent_id, target_path, new_content, title, reason, run_id=Non
             )
             return candidate
 
+    # Static validation (JSON parseable, Python syntax, tool handler, smoke-import).
+    # Run before taking a snapshot or writing anything — a broken patch never
+    # gets to touch the workspace, and the agent gets immediate feedback.
+    validation = validate_patch(target_path, new_content, workspace_root=workspace)
+    if not validation["ok"]:
+        patch = PatchProposal(
+            agent_id=agent_id,
+            run_id=run_id,
+            title=title,
+            reason=reason,
+            diff_text=diff,
+            target_path=target_path,
+            target_type=target_type,
+            security_level=level,
+            status="rejected",
+            test_result_json={"validation": validation, "error": validation["error"]},
+        )
+        db.session.add(patch)
+        db.session.commit()
+        logger.info(
+            "Patch rejected by validator: %s (agent %s) — %s",
+            target_path, agent_id, validation["error"],
+        )
+        return patch
+
     # Take snapshot
     snapshot_path = _take_snapshot(workspace, target_path)
 
@@ -135,6 +186,7 @@ def propose_change(agent_id, target_path, new_content, title, reason, run_id=Non
         security_level=level,
         status=status,
         snapshot_path=snapshot_path,
+        test_result_json={"validation": validation},
     )
     db.session.add(patch)
     db.session.commit()
@@ -153,13 +205,13 @@ def propose_change(agent_id, target_path, new_content, title, reason, run_id=Non
         rule = matches_rule(agent_id, target_path)
         if rule is not None:
             patch.status = "approved"
-            patch.test_result_json = {
-                "auto_approved_by_rule": {
-                    "rule_id": rule.id,
-                    "pattern": rule.pattern,
-                    "note": rule.note,
-                }
+            meta = dict(patch.test_result_json or {})
+            meta["auto_approved_by_rule"] = {
+                "rule_id": rule.id,
+                "pattern": rule.pattern,
+                "note": rule.note,
             }
+            patch.test_result_json = meta
             db.session.commit()
             _apply_patch(patch, agent, new_content)
             logger.info(
@@ -182,15 +234,15 @@ def propose_change(agent_id, target_path, new_content, title, reason, run_id=Non
             run_id=run_id,
         )
         if review is not None:
-            patch.test_result_json = {
-                "reviewer": {
-                    "slug": review.get("reviewer"),
-                    "approve": review.get("approve"),
-                    "summary": review.get("summary"),
-                    "run_id": review.get("run_id"),
-                    "error": review.get("error"),
-                }
+            meta = dict(patch.test_result_json or {})
+            meta["reviewer"] = {
+                "slug": review.get("reviewer"),
+                "approve": review.get("approve"),
+                "summary": review.get("summary"),
+                "run_id": review.get("run_id"),
+                "error": review.get("error"),
             }
+            patch.test_result_json = meta
             if review.get("approve"):
                 patch.status = "approved"
                 db.session.commit()
@@ -257,7 +309,37 @@ def apply_patch(patch_id):
         patch.snapshot_path = _take_snapshot(workspace, patch.target_path)
 
     _apply_patch(patch, agent, new_content)
+    if patch.status != "applied":
+        err = (patch.test_result_json or {}).get("error") or "validation failed"
+        return patch, f"Validation blocked apply: {err}"
     return patch, None
+
+
+def revalidate_patch(patch_id):
+    """Re-run the static validator on a patch's reconstructed content.
+
+    Useful when a patch has been sitting pending for a while and the admin
+    wants to confirm it still passes. Does NOT change patch status on failure
+    — this is a diagnostic, not a gate. Returns (patch, error, validation).
+    """
+    patch = db.session.get(PatchProposal, patch_id)
+    if patch is None:
+        return None, "Patch not found", None
+    agent = db.session.get(Agent, patch.agent_id)
+    if agent is None:
+        return patch, "Agent not found", None
+
+    new_content = _reconstruct_content(patch)
+    if new_content is None:
+        return patch, "Cannot reconstruct content from diff", None
+
+    workspace = get_workspace_path(agent)
+    validation = validate_patch(patch.target_path, new_content, workspace_root=workspace)
+    meta = dict(patch.test_result_json or {})
+    meta["revalidation"] = validation
+    patch.test_result_json = meta
+    db.session.commit()
+    return patch, None, validation
 
 
 def rollback_patch(patch_id):
@@ -300,6 +382,38 @@ def rollback_patch(patch_id):
 # -- Internal helpers --
 
 
+def _rate_limit_check(agent_id: int) -> str | None:
+    """Return an error message if the agent has hit its per-hour patch cap.
+
+    Counts patches in the last 60 minutes whose status implies real work
+    (applied or pending_review). Rejected/rolled_back patches don't count.
+    Returns None when the agent is under the limit or the limit is disabled.
+    """
+    try:
+        cap = int(current_app.config.get("PATCHES_PER_HOUR_PER_AGENT", 0) or 0)
+    except (TypeError, ValueError):
+        cap = 0
+    if cap <= 0:
+        return None
+
+    since = datetime.now(timezone.utc) - timedelta(hours=1)
+    count = (
+        PatchProposal.query
+        .filter(
+            PatchProposal.agent_id == agent_id,
+            PatchProposal.created_at >= since,
+            PatchProposal.status.in_(("applied", "pending_review", "approved")),
+        )
+        .count()
+    )
+    if count >= cap:
+        return (
+            f"Self-improvement rate limit hit: {count}/{cap} patches in the "
+            "last hour. Wait before proposing more changes."
+        )
+    return None
+
+
 def _compute_diff(filename, old_content, new_content):
     """Compute a unified diff between old and new content."""
     old_lines = (old_content or "").splitlines(keepends=True)
@@ -332,7 +446,31 @@ def _take_snapshot(workspace, target_path):
 
 
 def _apply_patch(patch, agent, new_content):
-    """Write new content to workspace and update patch status."""
+    """Write new content to workspace and update patch status.
+
+    Re-runs validation as a safety net: propose-time checks may be stale if
+    the patch sat pending for a while, or if an admin is applying a patch
+    whose content was reconstructed from a diff against a file that has
+    since changed.
+    """
+    workspace = get_workspace_path(agent)
+    validation = validate_patch(patch.target_path, new_content, workspace_root=workspace)
+    if not validation["ok"]:
+        meta = dict(patch.test_result_json or {})
+        meta["validation_at_apply"] = validation
+        meta["error"] = validation["error"]
+        patch.test_result_json = meta
+        patch.status = "rejected"
+        db.session.commit()
+        logger.warning(
+            "Patch %s rejected at apply time by validator: %s",
+            patch.id, validation["error"],
+        )
+        return
+
+    meta = dict(patch.test_result_json or {})
+    meta["validation_at_apply"] = validation
+    patch.test_result_json = meta
     write_file(agent, patch.target_path, new_content)
     patch.status = "applied"
     patch.applied_at = datetime.now(timezone.utc)

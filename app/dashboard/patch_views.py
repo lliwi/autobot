@@ -15,6 +15,7 @@ from app.services.patch_service import (
     get_patch,
     list_patches,
     reject_patch,
+    revalidate_patch,
     rollback_patch,
 )
 
@@ -158,4 +159,19 @@ def patch_rollback(patch_id):
         flash(f"Error rolling back: {error}", "danger")
     else:
         flash(f"Patch '{patch.title}' rolled back.", "success")
+    return redirect(url_for("dashboard.patch_detail", patch_id=patch_id))
+
+
+@dashboard_bp.route("/patches/<int:patch_id>/revalidate", methods=["POST"])
+@login_required
+def patch_revalidate(patch_id):
+    patch, error, validation = revalidate_patch(patch_id)
+    if error:
+        flash(error, "danger")
+    elif validation is None:
+        flash("Patch not found.", "danger")
+    elif validation.get("ok"):
+        flash("Validation passed.", "success")
+    else:
+        flash(f"Validation failed: {validation.get('error', 'unknown')}", "warning")
     return redirect(url_for("dashboard.patch_detail", patch_id=patch_id))

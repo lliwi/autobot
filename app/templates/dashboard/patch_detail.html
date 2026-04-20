@@ -66,10 +66,93 @@
     {% endif %}
 </div>
 
-{% if patch.test_result_json %}
+{% set tr = patch.test_result_json or {} %}
+{% set validation = tr.get('validation') %}
+{% set revalidation = tr.get('revalidation') %}
+{% set validation_at_apply = tr.get('validation_at_apply') %}
+{% set reviewer = tr.get('reviewer') %}
+{% set rule = tr.get('auto_approved_by_rule') %}
+
+{% if validation or revalidation or validation_at_apply %}
 <div class="section">
-    <h2>Test Results</h2>
-    <pre class="workspace-content">{{ patch.test_result_json | tojson(indent=2) }}</pre>
+    <h2>Validation</h2>
+    {% for label, v in [
+        ('At propose', validation),
+        ('At apply', validation_at_apply),
+        ('Most recent re-run', revalidation),
+    ] %}
+        {% if v %}
+        <div class="validation-block">
+            <div class="validation-head">
+                <strong>{{ label }}</strong>
+                <span class="badge badge-{{ 'active' if v.ok else 'error' }}">{{ 'PASS' if v.ok else 'FAIL' }}</span>
+            </div>
+            {% if v.error %}<div class="validation-error">{{ v.error }}</div>{% endif %}
+            {% if v.checks %}
+            <table class="validation-table">
+                <thead><tr><th>Check</th><th>Result</th><th>Detail</th></tr></thead>
+                <tbody>
+                {% for c in v.checks %}
+                <tr>
+                    <td><code>{{ c.name }}</code></td>
+                    <td><span class="badge badge-{{ 'active' if c.ok else 'error' }}">{{ 'OK' if c.ok else 'FAIL' }}</span></td>
+                    <td>{{ c.detail or '' }}</td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+            {% endif %}
+        </div>
+        {% endif %}
+    {% endfor %}
+</div>
+{% endif %}
+
+{% if reviewer %}
+<div class="section">
+    <h2>Reviewer verdict</h2>
+    <div class="detail-grid">
+        <div class="detail-item"><strong>Reviewer:</strong> <code>{{ reviewer.slug or '—' }}</code></div>
+        <div class="detail-item">
+            <strong>Verdict:</strong>
+            <span class="badge badge-{{ 'active' if reviewer.approve else 'warning' }}">
+                {{ 'APPROVE' if reviewer.approve else 'REJECT' }}
+            </span>
+        </div>
+        {% if reviewer.run_id %}
+        <div class="detail-item"><strong>Run:</strong> #{{ reviewer.run_id }}</div>
+        {% endif %}
+        {% if reviewer.error %}
+        <div class="detail-item"><strong>Error:</strong> {{ reviewer.error }}</div>
+        {% endif %}
+    </div>
+    {% if reviewer.summary %}
+    <pre class="workspace-content">{{ reviewer.summary }}</pre>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if rule %}
+<div class="section">
+    <h2>Auto-approved by standing rule</h2>
+    <div class="detail-grid">
+        <div class="detail-item"><strong>Rule:</strong> #{{ rule.rule_id }}</div>
+        <div class="detail-item"><strong>Pattern:</strong> <code>{{ rule.pattern }}</code></div>
+        {% if rule.note %}<div class="detail-item"><strong>Note:</strong> {{ rule.note }}</div>{% endif %}
+    </div>
+</div>
+{% endif %}
+
+{% if tr.get('rate_limited') %}
+<div class="section">
+    <div class="flash flash-warning">Rate-limited: {{ tr.get('error') }}</div>
+</div>
+{% endif %}
+
+{% if patch.snapshot_path %}
+<div class="section">
+    <h2>Snapshot</h2>
+    <p><small>Pre-change copy preserved for rollback:</small> <code>{{ patch.snapshot_path }}</code></p>
 </div>
 {% endif %}
 
@@ -117,5 +200,53 @@
         <button type="submit" class="btn">Rollback</button>
     </form>
     {% endif %}
+
+    {% if patch.status in ('pending_review', 'approved') and patch.diff_text %}
+    <form method="POST" action="{{ url_for('dashboard.patch_revalidate', patch_id=patch.id) }}" style="display:inline;">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <button type="submit" class="btn" title="Re-run static checks against the patch's reconstructed content">Re-run validations</button>
+    </form>
+    {% endif %}
 </div>
+
+<style>
+.validation-block {
+    margin-bottom: 1rem;
+    padding: 0.75rem 1rem;
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: 6px;
+}
+.validation-head {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.5rem;
+}
+.validation-error {
+    padding: 0.45rem 0.6rem;
+    background: rgba(239,68,68,0.08);
+    border-left: 3px solid #ef4444;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+    font-size: 0.85rem;
+    margin-bottom: 0.6rem;
+    word-break: break-word;
+}
+.validation-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+.validation-table th, .validation-table td {
+    text-align: left;
+    padding: 0.35rem 0.55rem;
+    border-bottom: 1px solid var(--border, #e5e7eb);
+    vertical-align: top;
+}
+.validation-table th {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-secondary, #6b7280);
+}
+</style>
 {% endblock %}

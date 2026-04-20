@@ -72,7 +72,8 @@
       "Bash(python3 -c \"import ast; ast.parse\\(open\\('/home/llibert/Documents/development/flask/autobot/app/dashboard/views.py'\\).read\\(\\)\\); print\\('OK'\\)\")",
       "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} \\(logs\\)\\\\n\" http://localhost:5000/dashboard/logs)",
       "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} \\(root\\)\\\\n\" http://localhost:5000/)",
-      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} \\(logs\\)\\\\n\" -L http://localhost:5000/logs)"
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} \\(logs\\)\\\\n\" -L http://localhost:5000/logs)",
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:5000/login)"
     ],
     "additionalDirectories": [
       "/tmp"
