@@ -28,7 +28,7 @@ CODEX_CLIENT_VERSION = "0.50.0"
 # ChatGPT subscription. OpenAI's /codex/models endpoint currently only advertises
 # "gpt-5.2", so we merge this curated list with whatever the API returns so that
 # the dashboard reflects the user's actual plan.
-KNOWN_CODEX_MODELS = ["gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"]
+KNOWN_CODEX_MODELS = ["gpt-5.5", "gpt-5.4", "gpt-5.4-mini", "gpt-5.3-codex", "gpt-5.2"]
 FALLBACK_MODELS = KNOWN_CODEX_MODELS
 
 
