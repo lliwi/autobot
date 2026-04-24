@@ -80,6 +80,7 @@ def delegate_task(parent_agent_id, target_agent_id, task_message, parent_run_id=
         return {"error": f"Sub-agent '{target.name}' is not active"}
 
     from app.services.chat_service import run_agent_non_streaming
+    from app.services.session_service import close_session
 
     result = run_agent_non_streaming(
         agent_id=target.id,
@@ -87,6 +88,9 @@ def delegate_task(parent_agent_id, target_agent_id, task_message, parent_run_id=
         channel_type="internal",
         trigger_type="delegation",
     )
+
+    if result.get("session_id"):
+        close_session(result["session_id"])
 
     # Link the child run to the parent run
     if parent_run_id and result.get("run_id"):

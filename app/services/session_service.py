@@ -30,6 +30,13 @@ def get_or_create_session(agent_id, channel_type="web", session_id=None, externa
     return session
 
 
+def close_session(session_id: int) -> None:
+    session = db.session.get(Session, session_id)
+    if session and session.status != "closed":
+        session.status = "closed"
+        db.session.commit()
+
+
 def add_message(session_id, role, content, metadata=None, token_count=None):
     msg = Message(
         session_id=session_id,

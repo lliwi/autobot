@@ -73,7 +73,8 @@
       "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} \\(logs\\)\\\\n\" http://localhost:5000/dashboard/logs)",
       "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} \\(root\\)\\\\n\" http://localhost:5000/)",
       "Bash(curl -s -o /dev/null -w \"HTTP %{http_code} \\(logs\\)\\\\n\" -L http://localhost:5000/logs)",
-      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:5000/login)"
+      "Bash(curl -s -o /dev/null -w \"HTTP %{http_code}\\\\n\" http://localhost:5000/login)",
+      "Bash(grep -v \"^$\\\\| Container\\\\| Network\\\\| Starting\\\\| Started\\\\| Created\\\\| Creating\\\\|^$\")"
     ],
     "additionalDirectories": [
       "/tmp"

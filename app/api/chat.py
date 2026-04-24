@@ -147,6 +147,18 @@ def get_session(session_id):
     return jsonify(session.to_dict())
 
 
+@api_bp.route("/sessions/<int:session_id>/close", methods=["POST"])
+@auth_required
+def close_session(session_id):
+    session = db.session.get(Session, session_id)
+    if session is None:
+        return jsonify(error="Session not found"), 404
+    if session.status != "closed":
+        session.status = "closed"
+        db.session.commit()
+    return jsonify(ok=True, session_id=session_id)
+
+
 @api_bp.route("/sessions/<int:session_id>/messages")
 @auth_required
 def get_session_messages(session_id):

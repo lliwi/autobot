@@ -304,6 +304,8 @@ def review_creation(agent: Agent, artefact_type: str, artefact_id: str,
     from app.models.run import Run
     from app.services.chat_service import run_agent_non_streaming
 
+    from app.services.session_service import close_session
+
     try:
         result = run_agent_non_streaming(
             agent_id=reviewer.id,
@@ -314,6 +316,9 @@ def review_creation(agent: Agent, artefact_type: str, artefact_id: str,
     except Exception as e:
         logger.exception("Auto-review failed for %s=%s", artefact_type, artefact_id)
         return {"reviewer": reviewer.slug, "error": str(e), "summary": None, "run_id": None}
+
+    if result.get("session_id"):
+        close_session(result["session_id"])
 
     child_run_id = result.get("run_id")
     if run_id and child_run_id:
@@ -369,6 +374,8 @@ def review_patch(agent: Agent, target_path: str, diff_text: str,
     from app.models.run import Run
     from app.services.chat_service import run_agent_non_streaming
 
+    from app.services.session_service import close_session
+
     try:
         result = run_agent_non_streaming(
             agent_id=reviewer.id,
@@ -380,6 +387,9 @@ def review_patch(agent: Agent, target_path: str, diff_text: str,
         logger.exception("Patch review failed for %s", target_path)
         return {"reviewer": reviewer.slug, "approve": False,
                 "summary": None, "error": str(e), "run_id": None}
+
+    if result.get("session_id"):
+        close_session(result["session_id"])
 
     child_run_id = result.get("run_id")
     if run_id and child_run_id:

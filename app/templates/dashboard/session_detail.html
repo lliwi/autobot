@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% block title %}Session #{{ session.id }} - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Session #{{ session.id }}</h1>
+    <a href="{{ url_for('dashboard.sessions_list') }}" class="btn">Back to Sessions</a>
+    {% if session.status == 'active' %}
+    <form method="POST" action="{{ url_for('dashboard.session_close', session_id=session.id) }}" style="display:inline;" onsubmit="return confirm('Close this session?')">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+        <input type="hidden" name="next" value="{{ url_for('dashboard.session_detail', session_id=session.id) }}">
+        <button type="submit" class="btn">Close session</button>
+    </form>
+    {% endif %}
+</div>
+
+<div class="detail-grid">
+    <div class="detail-item">
+        <strong>Agent:</strong>
+        {% if session.agent %}
+        <a href="{{ url_for('dashboard.agent_detail', agent_id=session.agent_id) }}">{{ session.agent.name }}</a>
+        {% else %}—{% endif %}
+    </div>
+    <div class="detail-item">
+        <strong>Channel:</strong>
+        <span class="badge badge-{{ 'active' if session.channel_type == 'web' else 'info' }}">{{ session.channel_type }}</span>
+    </div>
+    <div class="detail-item">
+        <strong>Status:</strong>
+        <span class="badge badge-{{ 'active' if session.status == 'active' else 'inactive' }}">{{ session.status }}</span>
+    </div>
+    <div class="detail-item">
+        <strong>Messages:</strong> {{ messages | length }}
+    </div>
+    <div class="detail-item">
+        <strong>Runs:</strong> {{ run_count }}
+    </div>
+    <div class="detail-item">
+        <strong>Created:</strong> {{ session.created_at | localtz('%Y-%m-%d %H:%M:%S') }}
+    </div>
+    <div class="detail-item">
+        <strong>Last activity:</strong> {{ session.updated_at | localtz('%Y-%m-%d %H:%M:%S') }}
+    </div>
+    {% if session.external_user_id %}
+    <div class="detail-item">
+        <strong>External user:</strong> <code>{{ session.external_user_id }}</code>
+    </div>
+    {% endif %}
+    {% if session.external_chat_id %}
+    <div class="detail-item">
+        <strong>External chat:</strong> <code>{{ session.external_chat_id }}</code>
+    </div>
+    {% endif %}
+</div>
+
+{% if messages %}
+<div class="section">
+    <h2>Messages</h2>
+    <div class="session-thread">
+        {% for msg in messages %}
+        <div class="session-msg session-msg-{{ msg.role }}">
+            <div class="session-msg-meta">
+                <span class="session-msg-role">{{ msg.role }}</span>
+                <span class="session-msg-time">{{ msg.created_at | localtz('%Y-%m-%d %H:%M:%S') }}</span>
+                {% if msg.token_count %}
+                <span class="session-msg-tokens">{{ msg.token_count }} tok</span>
+                {% endif %}
+            </div>
+            <div class="session-msg-body">
+                {%- set preview = msg.content[:600] -%}
+                {%- if msg.content | length > 600 -%}
+                    <span class="session-msg-preview">{{ preview }}</span><span class="session-msg-rest" hidden>{{ msg.content[600:] }}</span>
+                    <button type="button" class="session-msg-expand btn btn-sm" onclick="
+                        var rest = this.previousElementSibling;
+                        var prev = rest.previousElementSibling;
+                        if (rest.hidden) { rest.hidden = false; this.textContent = 'Show less'; }
+                        else { rest.hidden = true; this.textContent = 'Show more'; }
+                    ">Show more</button>
+                {%- else -%}
+                    {{ msg.content }}
+                {%- endif -%}
+            </div>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+{% else %}
+<p class="empty-state" style="margin-top: 1.5rem;">No messages in this session.</p>
+{% endif %}
+
+<style>
+.session-thread {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+.session-msg {
+    padding: 0.75rem 1rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg-panel);
+}
+.session-msg-user      { border-left: 3px solid var(--blue); background: var(--blue-bg, rgba(59,130,246,0.06)); }
+.session-msg-assistant { border-left: 3px solid var(--red); }
+.session-msg-tool      { border-left: 3px solid var(--amber); opacity: 0.85; }
+.session-msg-system    { border-left: 3px solid var(--fg-dim); opacity: 0.7; }
+.session-msg-meta {
+    display: flex;
+    align-items: baseline;
+    gap: 0.75rem;
+    margin-bottom: 0.4rem;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+.session-msg-role { font-weight: 700; }
+.session-msg-user .session-msg-role      { color: var(--blue); }
+.session-msg-assistant .session-msg-role { color: var(--red); }
+.session-msg-tool .session-msg-role      { color: var(--amber); }
+.session-msg-time, .session-msg-tokens  { color: var(--fg-dim); font-weight: 400; text-transform: none; letter-spacing: 0; }
+.session-msg-body {
+    font-size: 13px;
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--fg);
+}
+.session-msg-expand {
+    display: block;
+    margin-top: 0.4rem;
+    font-size: 11px;
+}
+</style>
+{% endblock %}

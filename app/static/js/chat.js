@@ -3,6 +3,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const messageInput = document.getElementById('message-input');
     const sendBtn = document.getElementById('send-btn');
     const stopBtn = document.getElementById('stop-btn');
+    const newChatBtn = document.getElementById('new-chat-btn');
     const chatForm = document.getElementById('chat-form');
     const messagesDiv = document.getElementById('messages');
 
@@ -33,6 +34,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     attachBtn.addEventListener('click', () => fileInput.click());
     attachRemove.addEventListener('click', clearAttachment);
+
+    if (newChatBtn) {
+        newChatBtn.addEventListener('click', async () => {
+            if (streaming) return;
+            // Close the current session server-side before discarding it.
+            if (sessionId) {
+                try {
+                    await fetch(`/api/sessions/${sessionId}/close`, { method: 'POST' });
+                } catch (_) { /* non-fatal */ }
+            }
+            sessionId = null;
+            clearAttachment();
+            messageInput.value = '';
+            messagesDiv.innerHTML = '<p class="empty-state">New session started — send a message to begin.</p>';
+            refreshContextMeter(agentSelect.value);
+            messageInput.focus();
+        });
+    }
 
     fileInput.addEventListener('change', () => {
         const file = fileInput.files[0];
@@ -70,6 +89,7 @@ document.addEventListener('DOMContentLoaded', () => {
         sendBtn.disabled = isStreaming;
         messageInput.disabled = isStreaming;
         attachBtn.disabled = isStreaming;
+        if (newChatBtn) newChatBtn.disabled = isStreaming;
     }
 
     function formatTokens(n) {
@@ -179,6 +199,7 @@ document.addEventListener('DOMContentLoaded', () => {
         messageInput.disabled = !enabled;
         sendBtn.disabled = !enabled;
         attachBtn.disabled = !enabled;
+        if (newChatBtn) newChatBtn.disabled = !enabled;
         currentAgentName = enabled
             ? (agentSelect.options[agentSelect.selectedIndex].text || '').trim()
             : '';
