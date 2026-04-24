@@ -6,6 +6,48 @@ document.addEventListener('DOMContentLoaded', () => {
     const chatForm = document.getElementById('chat-form');
     const messagesDiv = document.getElementById('messages');
 
+    // Attachment state
+    const fileInput = document.getElementById('file-input');
+    const attachBtn = document.getElementById('attach-btn');
+    const attachBadge = document.getElementById('attach-badge');
+    const attachBadgeName = document.getElementById('attach-badge-name');
+    const attachRemove = document.getElementById('attach-remove');
+    const ATTACH_MAX_BYTES = 500 * 1024; // 500 KB
+    let attachedFile = null; // { name, content }
+
+    function setAttachment(name, content) {
+        attachedFile = { name, content };
+        attachBadgeName.textContent = name;
+        attachBadge.hidden = false;
+        attachBtn.classList.add('has-attachment');
+        attachBtn.title = `Attached: ${name} — click to replace`;
+    }
+
+    function clearAttachment() {
+        attachedFile = null;
+        fileInput.value = '';
+        attachBadge.hidden = true;
+        attachBtn.classList.remove('has-attachment');
+        attachBtn.title = 'Attach a text file';
+    }
+
+    attachBtn.addEventListener('click', () => fileInput.click());
+    attachRemove.addEventListener('click', clearAttachment);
+
+    fileInput.addEventListener('change', () => {
+        const file = fileInput.files[0];
+        if (!file) return;
+        if (file.size > ATTACH_MAX_BYTES) {
+            alert(`File too large (${(file.size / 1024).toFixed(0)} KB). Maximum is ${ATTACH_MAX_BYTES / 1024} KB.`);
+            fileInput.value = '';
+            return;
+        }
+        const reader = new FileReader();
+        reader.onload = (e) => setAttachment(file.name, e.target.result);
+        reader.onerror = () => alert('Could not read the file.');
+        reader.readAsText(file, 'utf-8');
+    });
+
     const LAST_AGENT_KEY = 'autobot.chat.lastAgentId';
     const HIDE_TOOL_KEY = 'autobot.chat.hideTool';
     const hideToolToggle = document.getElementById('hide-tool-toggle');
@@ -27,6 +69,7 @@ document.addEventListener('DOMContentLoaded', () => {
         stopBtn.hidden = !isStreaming;
         sendBtn.disabled = isStreaming;
         messageInput.disabled = isStreaming;
+        attachBtn.disabled = isStreaming;
     }
 
     function formatTokens(n) {
@@ -135,6 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const enabled = agentId !== '';
         messageInput.disabled = !enabled;
         sendBtn.disabled = !enabled;
+        attachBtn.disabled = !enabled;
         currentAgentName = enabled
             ? (agentSelect.options[agentSelect.selectedIndex].text || '').trim()
             : '';
@@ -161,16 +205,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
     chatForm.addEventListener('submit', async (e) => {
         e.preventDefault();
-        if (streaming || !agentSelect.value || !messageInput.value.trim()) return;
+        const rawText = messageInput.value.trim();
+        if (streaming || !agentSelect.value || (!rawText && !attachedFile)) return;
 
-        const message = messageInput.value.trim();
+        // Build the full message: optional file block + user text
+        let message = rawText;
+        const fileSnapshot = attachedFile;
+        if (fileSnapshot) {
+            const ext = fileSnapshot.name.split('.').pop() || '';
+            const fence = `\`\`\`${ext}`;
+            const fileBlock = `[Attached: ${fileSnapshot.name}]\n${fence}\n${fileSnapshot.content}\n\`\`\``;
+            message = rawText ? `${fileBlock}\n\n${rawText}` : fileBlock;
+        }
+
         messageInput.value = '';
+        clearAttachment();
 
         if (messagesDiv.querySelector('.empty-state')) {
             messagesDiv.innerHTML = '';
         }
 
-        appendMessage('user', message);
+        // Display user bubble: show filename badge + text separately for readability
+        const displayText = fileSnapshot
+            ? (rawText ? `📎 ${fileSnapshot.name}\n\n${rawText}` : `📎 ${fileSnapshot.name}`)
+            : message;
+        appendMessage('user', displayText);
 
         setStreamingUI(true);
 
