@@ -51,6 +51,35 @@ _ENFORCE_ACTION_NUDGE = (
 )
 
 
+def _trim_inloop_messages(messages: list, budget: int, fixed_len: int) -> list:
+    """Drop oldest agentic round pairs to keep the running context under budget.
+
+    ``fixed_len`` marks the boundary of the initial context built by
+    ``build_context`` (system + trimmed history + user turn). Everything at
+    or after that index is agentic pairs appended during the tool-call loop.
+    We drop pairs (assistant-with-tool-calls + its following tool-result
+    messages) starting from the oldest until the total is under budget.
+
+    Called before each new model invocation, not after, so the model always
+    receives a coherent and affordable context even in long multi-round runs.
+    """
+    from app.runtime.context_budget import count_messages_tokens
+
+    while count_messages_tokens(messages) > budget:
+        cut_start = None
+        for i in range(fixed_len, len(messages)):
+            if messages[i].get("role") == "assistant" and messages[i].get("tool_calls"):
+                cut_start = i
+                break
+        if cut_start is None:
+            break  # nothing left to trim in the agentic section
+        cut_end = cut_start + 1
+        while cut_end < len(messages) and messages[cut_end].get("role") == "tool":
+            cut_end += 1
+        del messages[cut_start:cut_end]
+    return messages
+
+
 def run(agent, session, user_message, run_id):
     """Main reasoning loop. Generator that yields ChatChunk-like dicts.
 
@@ -62,6 +91,10 @@ def run(agent, session, user_message, run_id):
       - {"type": "done", "data": "...", "usage": {...}}
     """
     messages = build_context(agent, session, user_message)
+    # Mark the boundary between the initial context (system + history + user)
+    # and the agentic pairs appended during the loop. _trim_inloop_messages uses
+    # this to know which messages it may drop.
+    _fixed_len = len(messages)
 
     from app.runtime.context_budget import effective_budget
     from app.runtime.tool_registry import forget_run_reads
@@ -90,6 +123,11 @@ def run(agent, session, user_message, run_id):
         for round_num in range(max_rounds):
             full_response = ""
             tool_calls = None
+
+            # Trim accumulated agentic pairs that would push the context over
+            # budget. Must happen before the API call so the model never sees
+            # a payload that exceeds the window.
+            _trim_inloop_messages(messages, budget, _fixed_len)
 
             try:
                 for delta_type, delta_data in stream_chat_completion(agent, messages, tools or None):

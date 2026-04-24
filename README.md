@@ -45,6 +45,8 @@ Todas las variables se definen en `.env`. Ver `.env.example` para referencia.
 | `MAX_CONTEXT_TOKENS` | Límite del contexto del modelo (default: `128000`) | No |
 | `CONTEXT_RESPONSE_RESERVE_TOKENS` | Tokens reservados para la respuesta del modelo (default: `8000`) | No |
 | `MAX_HISTORY_MESSAGES` | Cap legacy; ya no es el límite real, lo es el budget de tokens | No |
+| `MAX_TOOL_ROUNDS` | Cap de rondas de tool-calls por run (default: `20`). Override por agente en `agents.max_tool_rounds` | No |
+| `PATCHES_PER_HOUR_PER_AGENT` | Rate-limit de automejora: patches `applied + pending_review + approved` por hora y agente (default: `30`, `0` = desactivado) | No |
 | `WORKSPACES_BASE_PATH` | Raíz de los workspaces (default: `./workspaces`) | No |
 | `PACKAGE_ALLOWLIST` | PyPI auto-instalables en venvs de workspace (CSV) | No |
 | `VENV_BASE_PACKAGES` | Packages preinstalados en cada venv nuevo (CSV) | No |
@@ -196,13 +198,13 @@ app/
 ├── __init__.py          # App factory + CLI commands (onboard, codex-*, setup-*, export/import-bundle…)
 ├── config.py            # Configuración por entorno
 ├── extensions.py        # SQLAlchemy, Flask-Login, Bcrypt, CSRF
-├── logging_config.py    # JSON logging estructurado a stdout
+├── logging_config.py    # JSON logging + Redis ring buffer (compartido web+worker para la vista Logs)
 ├── models/              # SQLAlchemy — ver sección "Modelo de datos"
 ├── api/                 # Blueprints REST: auth, agents, chat (SSE), runs, scheduler, metrics, skills, tools, subagents, patches, credentials, packages
 │   ├── middleware.py    # Decoradores auth_required, admin_required
 │   └── errors.py        # Manejadores de error JSON
-├── dashboard/           # Vistas HTMX: overview, agents, chat, scheduler, metrics, skills, tools, topology, subagents, patches, credentials, packages, heartbeat
-├── services/            # Lógica de negocio: auth, agent, session, chat, run, codex_auth, scheduler, metrics, matrix, skill, tool, subagent, patch, security_policy, credential, package, venv_manager, review, bundle
+├── dashboard/           # Vistas HTMX: overview, agents, chat, scheduler, metrics, logs, skills, tools, topology, subagents, patches, credentials, packages, heartbeat
+├── services/            # Lógica de negocio: auth, agent, session, chat, run, codex_auth, scheduler, metrics, matrix, skill, tool, subagent, patch, patch_validator, security_policy, credential, package, venv_manager, review, bundle
 ├── runtime/             # Motor del agente
 │   ├── context_builder.py  # Ensambla system prompt + historial con budget de tokens
 │   ├── context_budget.py   # Token counting (tiktoken cl100k_base) + drop-oldest trimming
@@ -210,7 +212,7 @@ app/
 │   ├── model_client.py     # Wrapper Codex con streaming
 │   ├── tool_registry.py    # Registro de tools built-in + cache per-run de lecturas
 │   ├── tool_executor.py    # Ejecuta tools y persiste en tool_executions
-│   └── agent_runner.py     # Loop de razonamiento (máx 10 rondas, cap de 20K chars por tool result)
+│   └── agent_runner.py     # Loop de razonamiento (max_tool_rounds configurable, cap de 20K chars por tool result)
 ├── workspace/           # Gestión de ficheros de workspace por agente
 │   ├── manager.py       # CRUD de ficheros, scaffolding, refresh TOOLS.md
 │   ├── loader.py        # Carga SOUL/MEMORY/PACKAGES (AGENTS y TOOLS van al manifest lazy)
@@ -483,7 +485,9 @@ feedback del reviewer. `review_token_budget_daily` limita el gasto diario en aud
 - `GET /api/metrics/usage-by-channel` — Uso por canal
 - `GET /api/metrics/usage-by-tool` — Uso por tool
 
-## Niveles de seguridad para automejora
+## Automejora (self-improvement)
+
+### Niveles de seguridad
 
 | Nivel | Permitido | Ejemplo |
 |---|---|---|
@@ -491,16 +495,72 @@ feedback del reviewer. `review_token_budget_daily` limita el gasto diario en aud
 | 2 — Revisión | Requiere aprobación | Modificar skills existentes, crear subagentes |
 | 3 — Prohibido | Bloqueado en MVP | Modificar core Flask, OAuth, BD, políticas |
 
+### Pipeline de validación
+
+Todo `propose_change` pasa por un validador estático antes de tocar disco, y
+vuelve a pasar en el momento del `apply` como red de seguridad. Checks actuales
+(ver [app/services/patch_validator.py](app/services/patch_validator.py)):
+
+| Check | Se ejecuta en | Bloquea si |
+|---|---|---|
+| `json_parse` | ficheros `.json` | no es JSON válido |
+| `manifest_shape` | `manifest.json` | falta `name` / `description`; `parameters` no es objeto |
+| `python_syntax` | ficheros `.py` | `ast.parse` falla |
+| `tool_handler_present` | `tools/*/tool.py` | no define `def handler(...)` top-level |
+| `smoke_import` | ficheros `.py` | importar el módulo falla (timeout 10 s, corre en el venv del workspace vía subprocess) |
+
+Un fallo de validación → el patch se queda en `rejected` con el detalle en
+`test_result_json.validation.error`. En el detalle del patch se pueden re-lanzar
+las validaciones manualmente con el botón **Re-run validations**.
+
+### Rate limit
+
+`PATCHES_PER_HOUR_PER_AGENT` (default `30`) limita cuántos patches puede generar
+un agente por hora deslizante. Sólo cuentan los estados "con coste"
+(`applied + pending_review + approved`); los rechazados por el validador no
+consumen cupo, para no penalizar un primer intento sintácticamente roto.
+
+### Flujo completo
+
+1. El agente invoca `propose_change` / `create_skill` / `create_tool`.
+2. Clasificación L1/L2/L3 + chequeo de rate-limit + validación estática.
+3. Si pasa validación: snapshot → L1 auto-apply; L2 busca rule → reviewer
+   sub-agent → queda pendiente si ninguno aprueba; L3 rechazado.
+4. En `apply` (manual o automático) re-validación, escritura al workspace y
+   marcado de `applied_at`.
+5. `rollback` restaura desde el snapshot guardado en `workspaces/<slug>/patches/`.
+
+## Observabilidad
+
+### Logs (ring buffer)
+
+Todos los registros de web y worker se envían a una lista Redis
+(`autobot:logs`, cap 5000) además de a stdout. El dashboard incluye una vista
+**Observability → Logs** con filtros por nivel, proceso (`web`/`worker`),
+logger, mensaje, y auto-refresh cada 5 s. Útil para ver en un solo timeline
+qué hizo el scheduler, el Matrix adapter y el runtime del agente.
+
 ## Roadmap
 
 - [x] **Fase 1 — Núcleo**: Flask, PostgreSQL, auth, chat SSE, runtime, workspace, Codex OAuth (PKCE CLI)
-- [x] **Fase 2 — Canales y Scheduler**: Matrix, heartbeat, cron, métricas, worker service
+- [x] **Fase 2 — Canales y Scheduler**: Matrix, heartbeat, cron con timezones, métricas, worker service
 - [x] **Fase 3 — Skills y Tools**: registro dinámico, descubrimiento desde workspace, validación, carga dinámica, panel dashboard
 - [x] **Fase 4 — Multiagente**: sub-agentes, herencia de OAuth, delegación síncrona, tools `delegate_task` / `list_subagents`, topología, trazabilidad `parent_run_id`
-- [x] **Fase 5 — Automejora**: `PatchProposal`, política de seguridad L1/L2/L3, diff unificado, snapshots + rollback, review-gating con sub-agente reviewer
+- [x] **Fase 5 — Automejora**: `PatchProposal`, política L1/L2/L3, diff unificado, snapshots + rollback, review-gating con sub-agente reviewer, **validador estático** (JSON/AST/handler/smoke-import), **rate-limit por agente**, UI de patches con checks detallados y botón "Re-run validations"
 - [x] **Credenciales**: store cifrado Fernet, scopes global/agente, fallback env, tools `get/set/list/delete_credential`
 - [x] **Packages por workspace**: venv aislado, allowlist, aprobación en dashboard, tools `install_package` / `list_packages`
 - [x] **Gestión de contexto**: token budget con `tiktoken`, drop-oldest, workspace index lazy-loaded, indicador de uso en chat
 - [x] **Chat markdown**: render seguro con marked + DOMPurify
 - [x] **Portabilidad**: `flask export-bundle` / `flask import-bundle` para clonar una instalación entera
-- [ ] **Fase 6 — Hardening**: sandbox de ejecución, observabilidad avanzada, límites finos de coste por agente, rotación de credenciales
+- [x] **Logs centralizados**: ring buffer Redis compartido web+worker, vista `Observability → Logs` con filtros + auto-refresh
+- [x] **Tests del core (bootstrap)**: suite `tests/` con 67 casos en pytest cubriendo `patch_validator` (JSON/AST/handler/smoke-import), `security_policy` (clasificación L1/L2/L3), `approval_rule_service` (patrones + CRUD) y `patch_service` (propose/approve/apply/reject/rollback, no-op, dedup, rate-limit). Se ejecutan con `docker compose run --rm web pytest`.
+- [ ] **Fase 6 — Hardening** (pendiente):
+    - **Ampliar cobertura de tests**: la suite base ya corre en verde. Queda extenderla a `scheduler_service` (cron + heartbeat), `agent_runner` (tool rounds, context budget), `review_service` (effort dial, sampling) y a un flow de integración end-to-end del chat SSE con runtime mockeado.
+    - **Sandbox real de ejecución**: workspace tools corren hoy en un venv por agente pero comparten filesystem/red/CPU del contenedor. Aislar con un contenedor efímero (Docker-in-Docker o `firecracker`/`bwrap`), network egress controlado, cuotas de CPU/memoria/filesystem.
+    - **Límites finos por agente**: cap diario de tokens / coste € por agente (`agents.daily_token_budget`, `daily_cost_budget_eur`) con freno automático cuando se supera. Hoy sólo existe `review_token_budget_daily` para el reviewer.
+    - **Métricas de coste**: columna `cost_eur` ya se persiste en `runs`; falta panel en Metrics con € por día / por agente / por tool, y alertas cuando sobrepasa umbral.
+    - **Rotación de credenciales**: marca `rotate_after` en `credentials`, aviso en dashboard cuando caduca. Hoy el admin las edita a mano sin recordatorio.
+    - **Rate-limit en APIs sensibles**: `RATELIMIT_STORAGE_URI` está configurado pero ningún endpoint lo usa todavía (login brute-force, chat flood).
+    - **Endpoint `/health`**: requisito de §9.5 — expone estado de DB, Redis, Matrix, scheduler, Codex OAuth.
+    - **Métricas Prometheus**: `/metrics` en formato Prometheus para observabilidad externa.
+    - **Auditoría firmada**: hoy los patches quedan en `patch_proposals` pero no hay hash encadenado que permita detectar manipulación retrospectiva del historial.
