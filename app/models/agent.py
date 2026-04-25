@@ -31,6 +31,10 @@ class Agent(db.Model):
     # When set, Matrix messages from this room are also appended to today's web
     # session so both channels share a unified conversation history.
     sync_matrix_room = db.Column(db.String(255), nullable=True)
+    # When True this agent handles Matrix messages that don't match any
+    # room-specific mapping. Only one agent should have this set at a time —
+    # update_agent enforces mutual exclusion.
+    matrix_default = db.Column(db.Boolean, nullable=False, default=False)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     updated_at = db.Column(
         db.DateTime,
@@ -60,6 +64,7 @@ class Agent(db.Model):
             "max_tool_rounds": self.max_tool_rounds,
             "forward_matrix_room": self.forward_matrix_room,
             "sync_matrix_room": self.sync_matrix_room,
+            "matrix_default": self.matrix_default,
             "children_count": len(self.children) if self.children else 0,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,

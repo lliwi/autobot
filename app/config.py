@@ -53,6 +53,9 @@ class Config:
     MATRIX_ALLOWED_USERS = os.environ.get("MATRIX_ALLOWED_USERS", "")  # comma-separated
     MATRIX_ALLOWED_DM_USERS = os.environ.get("MATRIX_ALLOWED_DM_USERS", "")  # DM-only allowlist; empty = fall back to MATRIX_ALLOWED_USERS
     MATRIX_GROUP_POLICY = os.environ.get("MATRIX_GROUP_POLICY", "mention")  # always, mention, allowlist
+    # Slug of the agent that handles Matrix messages when no room-specific
+    # mapping is found. Leave empty to fall back to the first active agent.
+    MATRIX_DEFAULT_AGENT_SLUG = os.environ.get("MATRIX_DEFAULT_AGENT_SLUG", "")
 
     # Scheduler
     SCHEDULER_ENABLED = os.environ.get("SCHEDULER_ENABLED", "true").lower() == "true"

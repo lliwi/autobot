@@ -47,6 +47,7 @@
         'dashboard.logs':              ('Observability', 'Logs'),
         'dashboard.sessions_list':     ('Observability', 'Sessions'),
         'dashboard.session_detail':    ('Observability', 'Session'),
+        'dashboard.matrix_dashboard':  ('Comms', 'Matrix'),
         'dashboard.profile':           ('Account', 'Profile'),
     } %}
     {% set crumb = crumb_map.get(request.endpoint, ('—', '—')) %}
@@ -226,6 +227,17 @@
                         </svg>
                     </span>
                     <span>Sessions</span>
+                </a>
+
+                <div class="nav-group">Comms</div>
+                <a class="nav-item {% if request.endpoint == 'dashboard.matrix_dashboard' %}active{% endif %}"
+                   href="{{ url_for('dashboard.matrix_dashboard') }}">
+                    <span class="ico">
+                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+                            <rect x="2" y="3" width="20" height="14" rx="2"/><path d="M8 21h8M12 17v4"/>
+                        </svg>
+                    </span>
+                    <span>Matrix</span>
                 </a>
             </nav>
 

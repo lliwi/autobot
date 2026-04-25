@@ -71,6 +71,15 @@ def update_agent(agent, data):
         agent.forward_matrix_room = (data["forward_matrix_room"] or "").strip() or None
     if "sync_matrix_room" in data:
         agent.sync_matrix_room = (data["sync_matrix_room"] or "").strip() or None
+    if "matrix_default" in data:
+        new_val = bool(data["matrix_default"])
+        if new_val and not agent.matrix_default:
+            # Clear the flag from any other agent to keep mutual exclusion.
+            from app.models.agent import Agent as _Agent
+            _Agent.query.filter(
+                _Agent.id != agent.id, _Agent.matrix_default.is_(True)
+            ).update({"matrix_default": False}, synchronize_session=False)
+        agent.matrix_default = new_val
     if "parent_agent_id" in data:
         raw = data["parent_agent_id"]
         old_parent_id = agent.parent_agent_id

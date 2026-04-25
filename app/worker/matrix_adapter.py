@@ -53,7 +53,7 @@ class MatrixBot:
             loop.close()
 
     async def _async_main(self):
-        from nio import AsyncClient, InviteMemberEvent, LoginResponse, RoomMessageText
+        from nio import AsyncClient, InviteMemberEvent, LoginResponse, MegolmEvent, RoomMessageText
 
         homeserver = self.app.config["MATRIX_HOMESERVER"]
         user_id = self.app.config["MATRIX_USER_ID"]
@@ -94,35 +94,137 @@ class MatrixBot:
             InviteMemberEvent,
         )
 
-        # Initial sync to skip old messages
-        await client.sync(timeout=10000, full_state=True)
+        # Warn on encrypted messages — bot has no E2E crypto store
+        client.add_event_callback(
+            lambda room, event: self._handle_encrypted(client, room, event),
+            MegolmEvent,
+        )
 
-        # Start outbox drain loop as a concurrent task
+        # Restore sync token from Redis so we resume from where we left off
+        # instead of replaying all events on every restart.
+        since = self._redis_get_sync_token()
+        if since:
+            logger.info("Matrix resuming sync from saved token (since=%s…)", since[:16])
+            client.next_batch = since
+
+        # Initial sync — with a saved token this processes only new events.
+        # Without one it does a full sync; we limit timeline to avoid replaying
+        # old messages by setting a small timeout.
+        resp = await client.sync(timeout=10000, full_state=True)
+        if hasattr(resp, "next_batch") and resp.next_batch:
+            self._redis_set_sync_token(resp.next_batch)
+
+        # Proactively redirect users stuck in encrypted DM rooms
+        asyncio.ensure_future(self._redirect_encrypted_dms(client))
+
+        # Start outbox drain loop and heartbeat as concurrent tasks
         drain_task = asyncio.ensure_future(self._drain_loop())
+        hb_task = asyncio.ensure_future(self._heartbeat_loop(client))
 
         # Sync loop
         retry_delay = 1
         while self._running:
             try:
-                await client.sync(timeout=30000)
-                retry_delay = 1  # Reset on success
+                resp = await client.sync(timeout=30000)
+                retry_delay = 1
+                if hasattr(resp, "next_batch") and resp.next_batch:
+                    self._redis_set_sync_token(resp.next_batch)
             except Exception as e:
                 logger.error(f"Matrix sync error: {e}")
                 await asyncio.sleep(min(retry_delay, 60))
                 retry_delay *= 2
 
         drain_task.cancel()
+        hb_task.cancel()
         await client.close()
 
     async def _drain_loop(self):
-        """Poll the Redis outbox every 2 s and dispatch queued messages."""
+        """Poll the Redis outbox every 2 s and dispatch queued messages.
+
+        Calls the async send methods directly — do NOT call the synchronous
+        send_dm/send_to_room wrappers here, as those use
+        run_coroutine_threadsafe(...).result() which deadlocks when called
+        from inside the event loop.
+        """
+        import json as _json
+        _QUEUE_KEY = "autobot:matrix_outbox"
+        _MAX_RETRIES = 3
+
         while self._running:
             try:
                 with self.app.app_context():
-                    from app.services.matrix_outbox import drain
-                    drained = drain(self, max_items=20)
-                    if drained:
-                        logger.debug("matrix_outbox: dispatched %d message(s)", drained)
+                    try:
+                        import redis as _redis
+                        r = _redis.Redis.from_url(
+                            self.app.config.get("REDIS_URL", "redis://localhost:6379/0"),
+                            socket_timeout=1.0, decode_responses=True,
+                        )
+                    except Exception:
+                        await asyncio.sleep(2)
+                        continue
+
+                    requeued = []
+                    sent = 0
+                    for _ in range(20):
+                        raw = r.lpop(_QUEUE_KEY)
+                        if raw is None:
+                            break
+                        try:
+                            item = _json.loads(raw)
+                            target = item.get("target", "")
+                            body = item.get("body", "")
+                            attempts = int(item.get("attempts", 0))
+                            if not target or not body:
+                                continue
+                            if target.startswith("!"):
+                                result = await self._send_to_room_async(target, body)
+                            elif target.startswith("@"):
+                                result = await self._send_dm_async(target, body)
+                            else:
+                                logger.warning("matrix_outbox: unknown target %r, skipping", target)
+                                continue
+                            if result.get("ok"):
+                                sent += 1
+                            else:
+                                err = result.get("error", "unknown")
+                                attempts += 1
+                                if attempts < _MAX_RETRIES:
+                                    logger.warning(
+                                        "matrix_outbox: delivery failed for %s (attempt %d/%d): %s",
+                                        target, attempts, _MAX_RETRIES, err,
+                                    )
+                                    requeued.append(_json.dumps({"target": target, "body": body, "attempts": attempts}))
+                                else:
+                                    logger.error(
+                                        "matrix_outbox: DROPPED message for %s after %d attempts. Error: %s",
+                                        target, attempts, err,
+                                    )
+                        except Exception:
+                            logger.exception("matrix_outbox drain: error on item %r", raw)
+
+                    if requeued:
+                        pipe = r.pipeline()
+                        for payload in requeued:
+                            pipe.rpush(_QUEUE_KEY, payload)
+                        pipe.execute()
+
+                    if sent:
+                        logger.info("matrix_outbox: dispatched %d message(s)", sent)
+
+                    # Process room-leave queue
+                    for _ in range(10):
+                        room_id = r.lpop("autobot:matrix:leave_queue")
+                        if not room_id:
+                            break
+                        try:
+                            await self._client.room_leave(room_id)
+                            # Remove from in-memory state immediately so the
+                            # next heartbeat write no longer includes this room.
+                            self._client.rooms.pop(room_id, None)
+                            logger.info("Left and removed room %s", room_id)
+                        except Exception:
+                            logger.exception("Failed to leave room %s", room_id)
+
             except asyncio.CancelledError:
                 return
             except Exception:
@@ -156,9 +258,159 @@ class MatrixBot:
         for _ in range(3):
             result = await client.join(room.room_id)
             if hasattr(result, "room_id"):
+                # After joining, check if the room is encrypted and redirect if needed
+                await asyncio.sleep(1)
+                joined_room = client.rooms.get(room.room_id)
+                if joined_room and getattr(joined_room, "encrypted", False) and joined_room.member_count <= 2:
+                    logger.info(
+                        "Joined encrypted DM room %s from %s — redirecting to unencrypted room",
+                        room.room_id, event.sender,
+                    )
+                    new_room_id = await self._create_dm_room(client, event.sender)
+                    if new_room_id and new_room_id != room.room_id:
+                        try:
+                            await client.room_send(
+                                room_id=room.room_id,
+                                message_type="m.room.message",
+                                content={"msgtype": "m.text", "body": (
+                                    "Hola! Este chat tiene cifrado E2E activado y no puedo recibir tus mensajes.\n\n"
+                                    "He creado un nuevo chat sin cifrado, acepta la invitación:\n"
+                                    f"https://matrix.to/#/{new_room_id}"
+                                )},
+                            )
+                        except Exception as e:
+                            logger.error("Failed to send redirect after join: %s", e)
+                        try:
+                            await client.room_send(
+                                room_id=new_room_id,
+                                message_type="m.room.message",
+                                content={"msgtype": "m.text", "body": "¡Hola! Usa este chat para hablar conmigo — sin cifrado, puedo responderte."},
+                            )
+                        except Exception as e:
+                            logger.error("Failed to send welcome to new room: %s", e)
                 return
             await asyncio.sleep(2)
         logger.error(f"Failed to join {room.room_id} after retries")
+
+    async def _heartbeat_loop(self, client):
+        """Write bot status to Redis every 15 s so the dashboard can read it."""
+        import json as _json
+        while self._running:
+            try:
+                rooms = []
+                for room_id, room in client.rooms.items():
+                    members = list(getattr(room, "users", {}).keys())
+                    rooms.append({
+                        "room_id": room_id,
+                        "encrypted": getattr(room, "encrypted", False),
+                        "member_count": getattr(room, "member_count", len(members)),
+                        "display_name": getattr(room, "display_name", None) or getattr(room, "name", None),
+                        "members": members,
+                    })
+                status = {
+                    "connected": self._ready.is_set(),
+                    "user_id": self.app.config.get("MATRIX_USER_ID", ""),
+                    "homeserver": self.app.config.get("MATRIX_HOMESERVER", ""),
+                    "rooms": rooms,
+                    "last_seen": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+                }
+                import redis as _redis
+                r = _redis.Redis.from_url(
+                    self.app.config.get("REDIS_URL", "redis://localhost:6379/0"),
+                    socket_timeout=0.5, decode_responses=True,
+                )
+                r.set("autobot:matrix:status", _json.dumps(status), ex=60)
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                pass
+            await asyncio.sleep(15)
+
+    async def _redirect_encrypted_dms(self, client):
+        """On startup, find all encrypted 2-person rooms and create unencrypted replacements.
+
+        Sends a redirect message into the encrypted room and a welcome into the
+        new one so the user knows where to go even if they can't send messages
+        in the encrypted room.
+        """
+        await asyncio.sleep(2)  # let the sync settle
+        for room_id, room in list(client.rooms.items()):
+            if not getattr(room, "encrypted", False):
+                continue
+            members = getattr(room, "users", {}) or {}
+            if len(members) != 2:
+                continue
+            # Find the other member (not the bot)
+            other = next((uid for uid in members if uid != client.user_id), None)
+            if other is None:
+                continue
+            logger.info("Startup: encrypted DM room %s with %s — creating unencrypted redirect", room_id, other)
+            new_room_id = await self._create_dm_room(client, other)
+            if not new_room_id or new_room_id == room_id:
+                continue
+            try:
+                await client.room_send(
+                    room_id=room_id,
+                    message_type="m.room.message",
+                    content={"msgtype": "m.text", "body": (
+                        "Este chat tiene cifrado E2E activado y no puedo recibir tus mensajes.\n\n"
+                        f"He creado un nuevo chat sin cifrado. Acepta la invitación o únete aquí:\n"
+                        f"https://matrix.to/#/{new_room_id}"
+                    )},
+                )
+            except Exception as e:
+                logger.error("Failed to send redirect to encrypted room %s: %s", room_id, e)
+            try:
+                await client.room_send(
+                    room_id=new_room_id,
+                    message_type="m.room.message",
+                    content={"msgtype": "m.text", "body": "¡Hola! Usa este chat para hablar conmigo — sin cifrado, puedo responderte correctamente."},
+                )
+            except Exception as e:
+                logger.error("Failed to send welcome to new room %s: %s", new_room_id, e)
+
+    async def _handle_encrypted(self, client, room, event):
+        """Create an unencrypted DM room and redirect the user there."""
+        if event.sender == client.user_id:
+            return
+
+        logger.warning(
+            "Matrix encrypted message from %s in %s — creating unencrypted redirect room.",
+            event.sender, room.room_id,
+        )
+
+        # Create (or reuse) an unencrypted room for this user.
+        new_room_id = await self._create_dm_room(client, event.sender)
+
+        if new_room_id and new_room_id != room.room_id:
+            body = (
+                "Este room tiene cifrado E2E activado y no puedo descifrar tus mensajes.\n\n"
+                f"Te he creado un nuevo chat sin cifrado. Úsalo para hablar conmigo:\n"
+                f"https://matrix.to/#/{new_room_id}"
+            )
+            # Also say hello in the new room so the user knows it's ready.
+            try:
+                await client.room_send(
+                    room_id=new_room_id,
+                    message_type="m.room.message",
+                    content={"msgtype": "m.text", "body": "¡Hola! Usa este chat para hablar conmigo — aquí no hay cifrado y puedo responderte correctamente."},
+                )
+            except Exception as e:
+                logger.error("Failed to send welcome to new room %s: %s", new_room_id, e)
+        else:
+            body = (
+                "Este room tiene cifrado E2E activado y no puedo descifrar tus mensajes. "
+                "Por favor, crea un nuevo chat directo desactivando el cifrado, o usa la Room ID sin cifrado que ya existe."
+            )
+
+        try:
+            await client.room_send(
+                room_id=room.room_id,
+                message_type="m.room.message",
+                content={"msgtype": "m.text", "body": body},
+            )
+        except Exception as e:
+            logger.error("Failed to send encryption redirect to %s: %s", room.room_id, e)
 
     async def _handle_message(self, client, room, event):
         """Handle an incoming Matrix message."""
@@ -167,6 +419,11 @@ class MatrixBot:
         # Ignore own messages
         if event.sender == client.user_id:
             return
+
+        logger.debug(
+            "Matrix inbound: room=%s sender=%s members=%s body=%.60s",
+            room.room_id, event.sender, room.member_count, event.body,
+        )
 
         with self.app.app_context():
             from app.services.matrix_service import (
@@ -179,14 +436,29 @@ class MatrixBot:
 
             is_dm = room.member_count <= 2
 
-            # Check allowlists
-            if not is_room_allowed(room.room_id):
-                return
+            # For DMs the room ID is dynamic and unknown in advance — skip the
+            # room allowlist and check only the user allowlist.
+            # For group rooms both checks apply.
             if is_dm:
                 if not is_dm_user_allowed(event.sender):
+                    logger.info(
+                        "Matrix DM from %s blocked by DM allowlist (room=%s)",
+                        event.sender, room.room_id,
+                    )
                     return
-            elif not is_user_allowed(event.sender):
-                return
+            else:
+                if not is_room_allowed(room.room_id):
+                    logger.info(
+                        "Matrix message in room %s blocked by room allowlist (sender=%s)",
+                        room.room_id, event.sender,
+                    )
+                    return
+                if not is_user_allowed(event.sender):
+                    logger.info(
+                        "Matrix message from %s blocked by user allowlist (room=%s)",
+                        event.sender, room.room_id,
+                    )
+                    return
 
             # Slash commands (approve/reject/pending) bypass the agent runtime.
             from app.services import matrix_command_service
@@ -209,14 +481,25 @@ class MatrixBot:
             # Get agent for this room
             agent = get_agent_for_room(room.room_id)
             if agent is None:
-                logger.warning(f"No active agent for room {room.room_id}")
+                logger.warning(
+                    "Matrix message in room %s has no matching active agent — ignoring. "
+                    "Set MATRIX_DEFAULT_AGENT_SLUG or configure sync_matrix_room on an agent.",
+                    room.room_id,
+                )
                 return
 
             # Check group response policy
             if not should_respond(room.member_count, event.body, client.user_id, agent):
+                logger.debug(
+                    "Matrix message from %s in room %s skipped by group_response_policy=%s",
+                    event.sender, room.room_id, agent.group_response_policy,
+                )
                 return
 
-            logger.info(f"Matrix message from {event.sender} in {room.room_id}: {event.body[:80]}")
+            logger.info(
+                "Matrix message from %s in room %s → agent %s: %.80s",
+                event.sender, room.room_id, agent.slug, event.body,
+            )
 
             # Run agent
             from app.services.chat_service import run_agent_non_streaming
@@ -329,23 +612,91 @@ class MatrixBot:
         return {"ok": False, "error": f"room_send failed: {resp}"}
 
     def _find_dm_room(self, client, user_id: str) -> str | None:
-        """Return an existing 2-person room we share with ``user_id``, or None."""
+        """Return an existing unencrypted DM room with ``user_id``.
+
+        Checks Redis first (survives restarts), then scans in-memory rooms.
+        Encrypted rooms are deliberately skipped — the bot cannot use them.
+        """
         target = user_id.strip()
+
+        # 1. Redis cache — verify the cached room is still valid and unencrypted
+        cached = self._redis_get_dm_room(target)
+        if cached and cached in client.rooms:
+            cached_room = client.rooms[cached]
+            if not getattr(cached_room, "encrypted", False):
+                return cached
+            # Cached room is encrypted — clear and fall through to scan
+            logger.info("Cached DM room %s for %s is encrypted, discarding.", cached, target)
+            self._redis_set_dm_room(target, "")  # clear
+
+        # 2. In-memory scan — skip encrypted rooms
         for room_id, room in client.rooms.items():
             members = getattr(room, "users", {}) or {}
             if len(members) == 2 and target in members:
+                if getattr(room, "encrypted", False):
+                    continue  # skip encrypted rooms
+                self._redis_set_dm_room(target, room_id)
                 return room_id
         return None
 
-    async def _create_dm_room(self, client, user_id: str) -> str | None:
-        from nio import RoomCreateResponse
+    def _redis_get_sync_token(self) -> str | None:
+        try:
+            import redis as _redis
+            r = _redis.Redis.from_url(
+                self.app.config.get("REDIS_URL", "redis://localhost:6379/0"),
+                socket_timeout=0.5, decode_responses=True,
+            )
+            return r.get("autobot:matrix:next_batch")
+        except Exception:
+            return None
 
+    def _redis_set_sync_token(self, token: str) -> None:
+        try:
+            import redis as _redis
+            r = _redis.Redis.from_url(
+                self.app.config.get("REDIS_URL", "redis://localhost:6379/0"),
+                socket_timeout=0.5, decode_responses=True,
+            )
+            r.set("autobot:matrix:next_batch", token)
+        except Exception:
+            pass
+
+    def _redis_get_dm_room(self, user_id: str) -> str | None:
+        try:
+            import redis as _redis
+            r = _redis.Redis.from_url(
+                self.app.config.get("REDIS_URL", "redis://localhost:6379/0"),
+                socket_timeout=0.5, decode_responses=True,
+            )
+            return r.get(f"autobot:matrix:dm:{user_id}")
+        except Exception:
+            return None
+
+    def _redis_set_dm_room(self, user_id: str, room_id: str) -> None:
+        try:
+            import redis as _redis
+            r = _redis.Redis.from_url(
+                self.app.config.get("REDIS_URL", "redis://localhost:6379/0"),
+                socket_timeout=0.5, decode_responses=True,
+            )
+            r.set(f"autobot:matrix:dm:{user_id}", room_id)
+        except Exception:
+            pass
+
+    async def _create_dm_room(self, client, user_id: str) -> str | None:
+        from nio import RoomCreateResponse, RoomPreset
+
+        # Use private_chat preset instead of trusted_private_chat.
+        # trusted_private_chat auto-enables E2E on most clients; private_chat
+        # creates an invite-only room without it.
         resp = await client.room_create(
             is_direct=True,
             invite=[user_id],
-            preset="trusted_private_chat",
+            preset=RoomPreset.private_chat,
         )
         if isinstance(resp, RoomCreateResponse):
+            self._redis_set_dm_room(user_id, resp.room_id)
+            logger.info("Created unencrypted DM room %s for %s", resp.room_id, user_id)
             return resp.room_id
         logger.error(f"Failed to create DM room with {user_id}: {resp}")
         return None

@@ -62,10 +62,37 @@ def should_respond(room_member_count, message_body, bot_user_id, agent):
 
 
 def get_agent_for_room(room_id):
-    """Get the agent assigned to a Matrix room. Falls back to first active agent."""
+    """Return the agent that should handle messages from *room_id*.
+
+    Resolution order:
+      1. Agent whose ``sync_matrix_room`` matches the room_id exactly.
+      2. Agent whose ``forward_matrix_room`` matches the room_id exactly.
+      3. Agent with slug matching ``MATRIX_DEFAULT_AGENT_SLUG`` (config).
+      4. First active agent (legacy fallback).
+    """
     from app.models.agent import Agent
 
-    # For MVP, use the first active agent
-    # TODO: Phase 4 will add room-to-agent mapping
-    agent = Agent.query.filter_by(status="active").first()
-    return agent
+    # 1. Explicit sync mapping
+    agent = Agent.query.filter_by(sync_matrix_room=room_id, status="active").first()
+    if agent:
+        return agent
+
+    # 2. Forward mapping (agent uses this room as its output channel)
+    agent = Agent.query.filter_by(forward_matrix_room=room_id, status="active").first()
+    if agent:
+        return agent
+
+    # 3. Agent flagged as Matrix default in the DB
+    agent = Agent.query.filter_by(matrix_default=True, status="active").first()
+    if agent:
+        return agent
+
+    # 4. Configured default slug (env-var fallback for deployments without DB flag)
+    default_slug = current_app.config.get("MATRIX_DEFAULT_AGENT_SLUG", "").strip()
+    if default_slug:
+        agent = Agent.query.filter_by(slug=default_slug, status="active").first()
+        if agent:
+            return agent
+
+    # 5. Legacy fallback
+    return Agent.query.filter_by(status="active").first()

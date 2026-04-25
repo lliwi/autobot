@@ -299,6 +299,7 @@ def agent_edit(agent_id):
                 "review_token_budget_daily": request.form.get("review_token_budget_daily", ""),
                 "forward_matrix_room": request.form.get("forward_matrix_room", ""),
                 "sync_matrix_room": request.form.get("sync_matrix_room", ""),
+                "matrix_default": request.form.get("matrix_default") == "1",
             })
         except ValueError as e:
             flash(str(e), "danger")

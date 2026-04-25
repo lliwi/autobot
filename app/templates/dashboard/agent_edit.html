@@ -89,6 +89,18 @@
         </small>
     </div>
     <div class="form-group">
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer;">
+            <input type="checkbox" name="matrix_default" value="1"
+                   {% if agent.matrix_default %}checked{% endif %}>
+            Default Matrix agent
+        </label>
+        <small class="help-text">
+            When checked, this agent handles all inbound Matrix messages that don't match
+            a specific room mapping. Only one agent can hold this role — enabling it here
+            clears it from any other agent automatically.
+        </small>
+    </div>
+    <div class="form-group">
         <label for="forward_matrix_room">Forward web chat → Matrix room</label>
         <input type="text" id="forward_matrix_room" name="forward_matrix_room"
                value="{{ agent.forward_matrix_room or '' }}"
