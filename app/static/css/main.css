@@ -850,7 +850,7 @@ details[open] summary { border-bottom: 1px solid var(--border); }
     padding: 14px 20px 18px;
     background: var(--bg);
 }
-.chat-input form { display: flex; gap: 8px; }
+.chat-input form { display: flex; gap: 8px; align-items: flex-end; }
 
 .context-meter {
     display: flex;
@@ -962,7 +962,9 @@ details[open] summary { border-bottom: 1px solid var(--border); }
     color: var(--fg);
     font-family: var(--mono);
     font-size: 13px;
-    resize: none;
+    resize: vertical;
+    min-height: 42px;
+    max-height: 800px;
 }
 .chat-input textarea:focus {
     outline: none;
