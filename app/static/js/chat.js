@@ -176,15 +176,22 @@ document.addEventListener('DOMContentLoaded', () => {
         marked.setOptions({ breaks: true, gfm: true });
     }
 
+    function normalizeSpacing(text) {
+        // Add a space after a sentence-ending period when immediately followed
+        // by an uppercase letter (models often omit this space).
+        return text.replace(/\.([A-ZÁÉÍÓÚÜÑÀÈÌÒÙÂÊÎÔÛÄËÏÖÜ])/g, '. $1');
+    }
+
     function renderMarkdown(text) {
         if (!text) return '';
+        const normalized = normalizeSpacing(text);
         if (!window.marked || !window.DOMPurify) {
-            return escapeHtml(text);
+            return escapeHtml(normalized);
         }
         try {
-            return DOMPurify.sanitize(marked.parse(text));
+            return DOMPurify.sanitize(marked.parse(normalized));
         } catch (_) {
-            return escapeHtml(text);
+            return escapeHtml(normalized);
         }
     }
 
