@@ -4,6 +4,7 @@ from app.models.message import Message
 from app.runtime.context_budget import (
     count_messages_tokens,
     effective_budget,
+    model_context_window,
     trim_history_to_budget,
 )
 from app.workspace.loader import (
@@ -151,7 +152,7 @@ def build_context(agent, session, user_message):
     user_turn = {"role": "user", "content": user_message}
 
     budget = effective_budget(
-        current_app.config["MAX_CONTEXT_TOKENS"],
+        model_context_window(agent.model_name, current_app.config["MAX_CONTEXT_TOKENS"]),
         current_app.config.get("CONTEXT_RESPONSE_RESERVE_TOKENS"),
     )
     result = trim_history_to_budget(system_messages, history_messages, user_turn, budget)
@@ -179,7 +180,7 @@ def estimate_context_tokens(agent, session, user_message) -> dict:
     messages = build_context(agent, session, user_message)
     total = count_messages_tokens(messages)
     budget = effective_budget(
-        current_app.config["MAX_CONTEXT_TOKENS"],
+        model_context_window(agent.model_name, current_app.config["MAX_CONTEXT_TOKENS"]),
         current_app.config.get("CONTEXT_RESPONSE_RESERVE_TOKENS"),
     )
     return {

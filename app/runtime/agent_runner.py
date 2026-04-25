@@ -96,7 +96,7 @@ def run(agent, session, user_message, run_id):
     # this to know which messages it may drop.
     _fixed_len = len(messages)
 
-    from app.runtime.context_budget import effective_budget
+    from app.runtime.context_budget import effective_budget, model_context_window
     from app.runtime.tool_registry import forget_run_reads
     from app.workspace.discovery import get_agent_tool_definitions
 
@@ -104,7 +104,7 @@ def run(agent, session, user_message, run_id):
     # Surface the budget so the client can render a context-usage indicator
     # after each turn without needing a second round-trip.
     budget = effective_budget(
-        current_app.config["MAX_CONTEXT_TOKENS"],
+        model_context_window(agent.model_name, current_app.config["MAX_CONTEXT_TOKENS"]),
         current_app.config.get("CONTEXT_RESPONSE_RESERVE_TOKENS"),
     )
     usage_total = {"input_tokens": 0, "output_tokens": 0, "budget": budget}

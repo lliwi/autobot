@@ -78,6 +78,7 @@ def chat_context():
     from app.runtime.context_budget import (
         count_messages_tokens,
         effective_budget,
+        model_context_window,
     )
     from app.runtime.context_builder import build_context
 
@@ -102,7 +103,7 @@ def chat_context():
         )
 
     budget = effective_budget(
-        current_app.config["MAX_CONTEXT_TOKENS"],
+        model_context_window(agent.model_name, current_app.config["MAX_CONTEXT_TOKENS"]),
         current_app.config.get("CONTEXT_RESPONSE_RESERVE_TOKENS"),
     )
 

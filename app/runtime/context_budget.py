@@ -166,6 +166,22 @@ def trim_history_to_budget(
     )
 
 
+# Known context windows per Codex/GPT-5 model (in tokens).
+# Used to override MAX_CONTEXT_TOKENS when the agent has a specific model set.
+MODEL_CONTEXT_WINDOWS: dict[str, int] = {
+    "gpt-5.5":       200_000,
+    "gpt-5.4":       128_000,
+    "gpt-5.4-mini":  128_000,
+    "gpt-5.3-codex": 128_000,
+    "gpt-5.2":       128_000,
+}
+
+
+def model_context_window(model_name: str | None, fallback: int) -> int:
+    """Return the known context window for *model_name*, or *fallback* if unknown."""
+    return MODEL_CONTEXT_WINDOWS.get(model_name or "", fallback)
+
+
 def effective_budget(max_context_tokens: int, response_reserve: int | None = None) -> int:
     """Tokens available for the prompt after reserving room for the reply.
 
