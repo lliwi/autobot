@@ -67,6 +67,10 @@ def update_agent(agent, data):
             if budget < 0:
                 raise ValueError("review_token_budget_daily must be >= 0")
             agent.review_token_budget_daily = budget or None
+    if "forward_matrix_room" in data:
+        agent.forward_matrix_room = (data["forward_matrix_room"] or "").strip() or None
+    if "sync_matrix_room" in data:
+        agent.sync_matrix_room = (data["sync_matrix_room"] or "").strip() or None
     if "parent_agent_id" in data:
         raw = data["parent_agent_id"]
         old_parent_id = agent.parent_agent_id

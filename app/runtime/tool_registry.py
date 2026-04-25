@@ -1170,28 +1170,39 @@ def _run_bash(_agent=None, _run_id=None, command=None, script=None,
 
 
 def _matrix_send(_agent=None, user_id=None, message=None, **kwargs):
-    """Send a DM through the MatrixBot exposed by the worker process.
+    """Send a Matrix DM or room message.
 
-    Only works inside the worker (where MatrixBot runs). If called from the
-    web process — where ``app.matrix_bot`` isn't set — this returns an error
-    rather than silently doing nothing.
+    Works from any process. When the MatrixBot is available in-process the
+    message is sent synchronously. Otherwise it is placed in a Redis outbox
+    and dispatched by the worker's drain loop (typically within a few seconds).
+
+    ``user_id`` accepts either a Matrix user ID (``@user:server``) for a DM
+    or a room ID (``!room:server``) to post into a specific room.
     """
     if not user_id:
-        return {"error": "Missing required argument 'user_id' (e.g. '@alice:example.org')."}
+        return {"error": "Missing required argument 'user_id' (Matrix user ID or room ID)."}
     if not message:
         return {"error": "Missing required argument 'message'."}
-    if not isinstance(user_id, str) or not user_id.startswith("@") or ":" not in user_id:
-        return {"error": f"Invalid Matrix ID '{user_id}'. Expected '@user:server'."}
+
+    target = user_id.strip()
+    is_room = target.startswith("!")
+    is_user = target.startswith("@") and ":" in target
+    if not is_room and not is_user:
+        return {"error": f"Invalid Matrix target '{target}'. Expected '@user:server' or '!room:server'."}
 
     from flask import current_app
 
     bot = getattr(current_app, "matrix_bot", None)
-    if bot is None:
-        return {
-            "error": (
-                "Matrix bot not available in this process. "
-                "This tool only works from the worker (scheduled tasks, heartbeat, "
-                "matrix messages) — not the web chat."
-            )
-        }
-    return bot.send_dm(user_id, message)
+    if bot is not None:
+        # In-process (worker): send immediately.
+        if is_room:
+            return bot.send_to_room(target, message)
+        return bot.send_dm(target, message)
+
+    # Web process: enqueue via Redis outbox; worker will dispatch.
+    try:
+        from app.services.matrix_outbox import enqueue
+        enqueue(target, message)
+        return {"ok": True, "queued": True, "note": "Message queued — will be sent by the worker within seconds."}
+    except Exception as e:
+        return {"error": f"Failed to queue Matrix message: {e}"}

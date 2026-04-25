@@ -109,6 +109,7 @@ def _run_in_venv(agent, tool, tool_py: Path, arguments: dict) -> dict:
     }
 
     env = _subprocess_env()
+    _inject_credentials(agent, env)
 
     try:
         proc = subprocess.run(
@@ -153,3 +154,21 @@ def _subprocess_env() -> dict:
     env.setdefault("PYTHONDONTWRITEBYTECODE", "1")
     env.setdefault("PYTHONUNBUFFERED", "1")
     return env
+
+
+def _inject_credentials(agent, env: dict) -> None:
+    """Decrypt all credentials visible to *agent* and add them to *env*.
+
+    Each credential is exported as ``AUTOBOT_CRED_<UPPER_NAME>=<plaintext>``.
+    Agent-scoped values shadow globals with the same name (resolved by the
+    service layer). The subprocess can then call
+    ``os.environ.get("AUTOBOT_CRED_<NAME>")`` directly — no DB access needed.
+    """
+    try:
+        from app.services.credential_service import list_credentials_for_subprocess
+        creds = list_credentials_for_subprocess(agent.id)
+        for name, value in creds.items():
+            env_key = f"AUTOBOT_CRED_{name.upper()}"
+            env[env_key] = value
+    except Exception:
+        logger.exception("Failed to inject credentials for agent %s", agent.id)

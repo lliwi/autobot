@@ -297,6 +297,8 @@ def agent_edit(agent_id):
                 "parent_agent_id": request.form.get("parent_agent_id", ""),
                 "review_effort": request.form.get("review_effort", ""),
                 "review_token_budget_daily": request.form.get("review_token_budget_daily", ""),
+                "forward_matrix_room": request.form.get("forward_matrix_room", ""),
+                "sync_matrix_room": request.form.get("sync_matrix_room", ""),
             })
         except ValueError as e:
             flash(str(e), "danger")

@@ -88,6 +88,25 @@
             itself so it doesn't audit its own output.
         </small>
     </div>
+    <div class="form-group">
+        <label for="forward_matrix_room">Forward web chat → Matrix room</label>
+        <input type="text" id="forward_matrix_room" name="forward_matrix_room"
+               value="{{ agent.forward_matrix_room or '' }}"
+               placeholder="!roomid:matrix.org  (leave blank to disable)">
+        <small class="help-text">
+            When set, every web chat assistant reply is also sent to this Matrix room ID.
+        </small>
+    </div>
+    <div class="form-group">
+        <label for="sync_matrix_room">Sync Matrix room → web history</label>
+        <input type="text" id="sync_matrix_room" name="sync_matrix_room"
+               value="{{ agent.sync_matrix_room or '' }}"
+               placeholder="!roomid:matrix.org  (leave blank to disable)">
+        <small class="help-text">
+            When set, messages from this Matrix room are also appended to today's web session
+            so both channels share a unified conversation history.
+        </small>
+    </div>
     <div class="form-actions">
         <button type="submit" class="btn btn-primary">Save</button>
         <a href="{{ url_for('dashboard.agent_detail', agent_id=agent.id) }}" class="btn">Cancel</a>

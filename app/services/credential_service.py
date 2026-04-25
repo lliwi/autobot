@@ -64,6 +64,31 @@ def _mask(value: str) -> str:
     return f"{value[:4]}…{value[-4:]}"
 
 
+def list_credentials_for_subprocess(agent_id: int) -> dict[str, str]:
+    """Return a name→plaintext dict of all credentials visible to *agent_id*.
+
+    Includes global (agent_id=NULL) credentials and agent-scoped ones.
+    Agent-scoped values shadow globals with the same name.
+    Used by the tool executor to inject credentials into subprocess env vars
+    as ``AUTOBOT_CRED_<UPPER_NAME>=<value>``.
+    """
+    rows = (
+        Credential.query
+        .filter(
+            db.or_(Credential.agent_id == agent_id, Credential.agent_id.is_(None))
+        )
+        .order_by(Credential.agent_id.asc().nullsfirst())  # globals first, scoped win
+        .all()
+    )
+    result: dict[str, str] = {}
+    for row in rows:
+        try:
+            result[row.name] = _decrypt(row.encrypted_value)
+        except Exception:
+            pass  # skip unreadable credentials rather than crashing the tool
+    return result
+
+
 def list_credentials(agent_id: int | None = None) -> list[Credential]:
     """Return credentials, optionally scoped to a specific agent.
 

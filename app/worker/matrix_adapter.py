@@ -97,6 +97,9 @@ class MatrixBot:
         # Initial sync to skip old messages
         await client.sync(timeout=10000, full_state=True)
 
+        # Start outbox drain loop as a concurrent task
+        drain_task = asyncio.ensure_future(self._drain_loop())
+
         # Sync loop
         retry_delay = 1
         while self._running:
@@ -108,7 +111,23 @@ class MatrixBot:
                 await asyncio.sleep(min(retry_delay, 60))
                 retry_delay *= 2
 
+        drain_task.cancel()
         await client.close()
+
+    async def _drain_loop(self):
+        """Poll the Redis outbox every 2 s and dispatch queued messages."""
+        while self._running:
+            try:
+                with self.app.app_context():
+                    from app.services.matrix_outbox import drain
+                    drained = drain(self, max_items=20)
+                    if drained:
+                        logger.debug("matrix_outbox: dispatched %d message(s)", drained)
+            except asyncio.CancelledError:
+                return
+            except Exception:
+                logger.exception("matrix_outbox drain error")
+            await asyncio.sleep(2)
 
     async def _handle_invite(self, client, room, event):
         """Auto-join rooms the bot is invited to, respecting allowlists.
@@ -225,6 +244,9 @@ class MatrixBot:
                 except Exception as e:
                     logger.error(f"Failed to send Matrix response: {e}")
 
+            # Sync to web session if this room is configured for it
+            _sync_to_web_session(self.app, agent, room.room_id, event.body, response_text)
+
     def send_dm(self, user_id: str, body: str, timeout: float = 30.0) -> dict:
         """Send a DM to ``user_id``. Safe to call from any thread.
 
@@ -271,6 +293,41 @@ class MatrixBot:
             return {"ok": True, "room_id": room_id, "event_id": resp.event_id}
         return {"ok": False, "error": f"room_send failed: {resp}"}
 
+    def send_to_room(self, room_id: str, body: str, timeout: float = 30.0) -> dict:
+        """Send *body* to an existing Matrix room by its room_id.
+
+        Unlike ``send_dm`` this does not create any room — the caller is
+        responsible for supplying a valid ``room_id``. Safe to call from any
+        thread. Returns ``{"ok": bool, ...}``.
+        """
+        if not self._running or self._loop is None:
+            return {"ok": False, "error": "Matrix bot not running"}
+        if not self._ready.wait(timeout=10):
+            return {"ok": False, "error": "Matrix bot not logged in yet"}
+
+        future = asyncio.run_coroutine_threadsafe(
+            self._send_to_room_async(room_id, body), self._loop,
+        )
+        try:
+            return future.result(timeout=timeout)
+        except Exception as e:
+            logger.exception("send_to_room failed")
+            return {"ok": False, "error": f"{type(e).__name__}: {e}"}
+
+    async def _send_to_room_async(self, room_id: str, body: str) -> dict:
+        client = self._client
+        if client is None:
+            return {"ok": False, "error": "Matrix client not initialised"}
+        from nio import RoomSendResponse
+        resp = await client.room_send(
+            room_id=room_id,
+            message_type="m.room.message",
+            content={"msgtype": "m.text", "body": body},
+        )
+        if isinstance(resp, RoomSendResponse):
+            return {"ok": True, "room_id": room_id, "event_id": resp.event_id}
+        return {"ok": False, "error": f"room_send failed: {resp}"}
+
     def _find_dm_room(self, client, user_id: str) -> str | None:
         """Return an existing 2-person room we share with ``user_id``, or None."""
         target = user_id.strip()
@@ -292,3 +349,43 @@ class MatrixBot:
             return resp.room_id
         logger.error(f"Failed to create DM room with {user_id}: {resp}")
         return None
+
+
+def _sync_to_web_session(app, agent, matrix_room_id: str, user_msg: str, assistant_msg: str) -> None:
+    """Append a Matrix exchange to today's web session if ``agent.sync_matrix_room`` matches.
+
+    Runs inside the Matrix bot's async event loop thread — uses an app context
+    to reach the DB. Non-fatal: any error is logged and swallowed.
+    """
+    sync_room = getattr(agent, "sync_matrix_room", None)
+    if not sync_room or sync_room != matrix_room_id:
+        return
+    try:
+        with app.app_context():
+            from datetime import datetime, time, timezone
+            from app.extensions import db
+            from app.models.session import Session
+            from app.services.session_service import add_message, get_or_create_session
+
+            start_of_day = datetime.combine(
+                datetime.now(timezone.utc).date(), time.min, tzinfo=timezone.utc
+            )
+            # Find or create today's web session for this agent.
+            session = (
+                Session.query.filter_by(agent_id=agent.id, channel_type="web")
+                .filter(Session.updated_at >= start_of_day)
+                .order_by(Session.updated_at.desc())
+                .first()
+            )
+            if session is None:
+                session = get_or_create_session(agent.id, channel_type="web")
+
+            add_message(session.id, role="user",
+                        content=f"[Matrix] {user_msg}",
+                        metadata={"source": "matrix", "room_id": matrix_room_id})
+            if assistant_msg:
+                add_message(session.id, role="assistant", content=assistant_msg)
+    except Exception:
+        logger.exception(
+            "Matrix->web sync failed for agent=%s room=%s", agent.id, matrix_room_id
+        )

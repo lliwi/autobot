@@ -137,6 +137,7 @@ def stream_response(agent_id, message, session_id=None):
             content=full_response,
             token_count=usage.get("output_tokens"),
         )
+        _forward_to_matrix(agent, full_response)
 
     # Finalize run
     finish_run(
@@ -190,3 +191,17 @@ def run_agent_non_streaming(agent_id, message, session_id=None, channel_type="we
     _close_chat_objective(objective_id, succeeded=not error, error_summary=error)
 
     return {"response": full_response, "error": error, "session_id": session.id, "run_id": run.id}
+
+
+def _forward_to_matrix(agent, text: str) -> None:
+    """Enqueue *text* to agent.forward_matrix_room via the Redis outbox. Non-fatal."""
+    room_id = getattr(agent, "forward_matrix_room", None)
+    if not room_id or not text:
+        return
+    try:
+        from app.services.matrix_outbox import enqueue
+        enqueue(room_id, text)
+    except Exception:
+        current_app.logger.exception(
+            "web->Matrix forward error for agent=%s room=%s", agent.id, room_id
+        )
