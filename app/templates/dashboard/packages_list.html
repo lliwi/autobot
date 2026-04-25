@@ -92,6 +92,12 @@
                     <button type="submit" class="btn btn-sm">Reject</button>
                 </form>
                 {% endif %}
+                {% if p.status == 'failed' or p.status == 'rejected' %}
+                <form method="POST" action="{{ url_for('dashboard.package_delete', installation_id=p.id) }}" style="display:inline;" onsubmit="return confirm('Delete this request for {{ p.name }}?');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-danger">Delete</button>
+                </form>
+                {% endif %}
                 {% if p.status == 'installed' %}
                 <form method="POST" action="{{ url_for('dashboard.package_uninstall', installation_id=p.id) }}" style="display:inline;" onsubmit="return confirm('Uninstall {{ p.name }} from {{ p.agent_slug }}?');">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

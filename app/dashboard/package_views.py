@@ -4,7 +4,7 @@ from flask_login import current_user, login_required
 from app.dashboard import dashboard_bp
 from app.models.agent import Agent
 from app.services import package_service
-from app.services.package_service import PackageError
+from app.services.package_service import PackageError, delete_request
 
 
 @dashboard_bp.route("/packages")
@@ -71,6 +71,18 @@ def package_reject(installation_id):
         flash(str(e), "danger")
         return redirect(url_for("dashboard.packages_list"))
     flash(f"'{row.name}' rejected.", "info")
+    return redirect(url_for("dashboard.packages_list"))
+
+
+@dashboard_bp.route("/packages/<int:installation_id>/delete", methods=["POST"])
+@login_required
+def package_delete(installation_id):
+    try:
+        row = delete_request(installation_id)
+    except PackageError as e:
+        flash(str(e), "danger")
+        return redirect(url_for("dashboard.packages_list"))
+    flash(f"Request for '{row.name}' deleted.", "success")
     return redirect(url_for("dashboard.packages_list"))
 
 

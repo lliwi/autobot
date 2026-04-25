@@ -163,6 +163,18 @@ def reject(installation_id: int, reason: str | None = None,
     return row
 
 
+def delete_request(installation_id: int) -> PackageInstallation:
+    """Delete a failed or rejected installation record without uninstalling anything."""
+    row = db.session.get(PackageInstallation, installation_id)
+    if row is None:
+        raise PackageError("installation not found")
+    if row.status not in ("failed", "rejected"):
+        raise PackageError("only failed or rejected requests can be deleted")
+    db.session.delete(row)
+    db.session.commit()
+    return row
+
+
 def uninstall(installation_id: int) -> PackageInstallation:
     row = db.session.get(PackageInstallation, installation_id)
     if row is None:
