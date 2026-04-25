@@ -104,7 +104,32 @@ function loadCharts(days) {
     });
 
     fetchJson(`/api/metrics/usage-by-tool?days=${days}`).then(d => {
-        barChart('chart-tools', d.map(r => r.tool_name), d.map(r => r.count), 'Executions');
+        new Chart(document.getElementById('chart-tools'), {
+            type: 'pie',
+            data: {
+                labels: d.map(r => r.tool_name),
+                datasets: [{
+                    data: d.map(r => r.count),
+                    backgroundColor: COLORS.slice(0, d.length),
+                    borderWidth: 1,
+                }]
+            },
+            options: {
+                responsive: true,
+                plugins: {
+                    legend: { position: 'right', labels: { boxWidth: 12, font: { size: 11 } } },
+                    tooltip: {
+                        callbacks: {
+                            label: ctx => {
+                                const total = ctx.dataset.data.reduce((a, b) => a + b, 0);
+                                const pct = total ? ((ctx.parsed / total) * 100).toFixed(1) : 0;
+                                return ` ${ctx.label}: ${ctx.parsed} (${pct}%)`;
+                            }
+                        }
+                    }
+                }
+            }
+        });
     });
 }
 
