@@ -866,8 +866,7 @@ details[open] summary { border-bottom: 1px solid var(--border); }
 .context-meter-bar {
     flex: 1;
     height: 4px;
-    background: var(--bg-raised);
-    border: 1px solid var(--border);
+    background: var(--border-str);
     border-radius: 2px;
     overflow: hidden;
 }
