@@ -205,7 +205,8 @@ def set_credential(name: str, value: str, description: str | None = None,
 
 def update_credential(credential_id: int, *, value: str | None = None,
                       username: str | None = None,
-                      description: str | None = None) -> Credential:
+                      description: str | None = None,
+                      agent_id: int | None | type(...) = ...) -> Credential:
     """Update an existing credential by id.
 
     Only fields whose parameter is provided are changed:
@@ -214,9 +215,9 @@ def update_credential(credential_id: int, *, value: str | None = None,
         string is treated as "unchanged" (so the admin can leave the field as-is
         without wiping it). Pass a non-empty string to change it.
       * ``description``: ``None`` keeps existing, any string (including "") replaces it.
-
-    Name, credential_type, and agent_id cannot be changed here — those would
-    affect unique keys/scoping semantics; delete and recreate instead.
+      * ``agent_id``: pass an int to scope to an agent, None for global, or omit
+        to leave unchanged. Raises CredentialError if the new (agent_id, name) pair
+        would conflict with an existing credential.
     """
     row = db.session.get(Credential, credential_id)
     if row is None:
@@ -232,6 +233,22 @@ def update_credential(credential_id: int, *, value: str | None = None,
 
     if description is not None:
         row.description = description or None
+
+    if agent_id is not ...:
+        if agent_id is not None and db.session.get(Agent, agent_id) is None:
+            raise CredentialError(f"agent {agent_id} not found")
+        conflict = (
+            Credential.query
+            .filter_by(agent_id=agent_id, name=row.name)
+            .filter(Credential.id != credential_id)
+            .first()
+        )
+        if conflict:
+            scope = f"agent {agent_id}" if agent_id else "global"
+            raise CredentialError(
+                f"A credential named '{row.name}' already exists for {scope}."
+            )
+        row.agent_id = agent_id
 
     db.session.commit()
     return row

@@ -76,14 +76,15 @@ def credential_edit(credential_id):
         value = request.form.get("value") or ""
         username = request.form.get("username")
         description = request.form.get("description")
-        # Normalize "" vs None semantics: an empty description field should
-        # clear the stored note, so forward the raw form value (may be "").
+        raw_agent_id = request.form.get("agent_id", "").strip()
+        new_agent_id = int(raw_agent_id) if raw_agent_id else None
         try:
             update_credential(
                 credential_id,
                 value=value or None,
                 username=username if username is not None else None,
                 description=description if description is not None else None,
+                agent_id=new_agent_id,
             )
         except CredentialError as e:
             flash(str(e), "danger")
@@ -91,9 +92,11 @@ def credential_edit(credential_id):
         flash(f"Credential '{row.name}' updated.", "success")
         return redirect(url_for("dashboard.credentials_list"))
 
+    agents = Agent.query.order_by(Agent.name).all()
     return render_template(
         "dashboard/credentials_edit.html",
         credential=to_dict(row),
+        agents=agents,
     )
 
 
