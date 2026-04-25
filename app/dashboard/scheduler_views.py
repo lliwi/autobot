@@ -27,13 +27,15 @@ def scheduler_create():
     if request.method == "POST":
         task = create_task(
             agent_id=int(request.form["agent_id"]),
+            name=request.form.get("name", ""),
             task_type=request.form["task_type"],
             schedule_expr=request.form.get("schedule_expr") or None,
             timezone_str=request.form.get("timezone", "UTC"),
             payload_json={"message": request.form.get("payload_message", "")} if request.form.get("payload_message") else None,
             max_retries=int(request.form.get("max_retries", 3)),
         )
-        flash(f"Scheduled task created (ID {task.id}).", "success")
+        label = task.name or f"ID {task.id}"
+        flash(f"Scheduled task '{label}' created.", "success")
         return redirect(url_for("dashboard.scheduler_list"))
 
     agents = Agent.query.order_by(Agent.name).all()
@@ -53,6 +55,7 @@ def scheduler_edit(task_id):
         payload = {"message": payload_message} if payload_message else None
         update_task(
             task_id,
+            name=request.form.get("name", ""),
             agent_id=int(request.form["agent_id"]),
             task_type=request.form["task_type"],
             schedule_expr=request.form.get("schedule_expr") or None,

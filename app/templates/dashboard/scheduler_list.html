@@ -12,6 +12,7 @@
 <table class="table">
     <thead>
         <tr>
+            <th>Name</th>
             <th>Agent</th>
             <th>Type</th>
             <th>Schedule</th>
@@ -26,6 +27,7 @@
     <tbody>
         {% for task in tasks %}
         <tr>
+            <td>{{ task.name or '—' }}</td>
             <td>{{ task.agent.name if task.agent else 'N/A' }}</td>
             <td><code>{{ task.task_type }}</code></td>
             <td><code>{{ task.schedule_expr or '-' }}</code></td>

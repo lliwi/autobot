@@ -7,9 +7,10 @@ from app.extensions import db
 from app.models.scheduled_task import ScheduledTask
 
 
-def create_task(agent_id, task_type, schedule_expr=None, timezone_str="UTC", payload_json=None, enabled=True, max_retries=3):
+def create_task(agent_id, task_type, schedule_expr=None, timezone_str="UTC", payload_json=None, enabled=True, max_retries=3, name=None):
     task = ScheduledTask(
         agent_id=agent_id,
+        name=(name or "").strip() or None,
         task_type=task_type,
         schedule_expr=schedule_expr,
         timezone=timezone_str,
@@ -28,6 +29,8 @@ def update_task(task_id, **kwargs):
     task = db.session.get(ScheduledTask, task_id)
     if task is None:
         return None
+    if "name" in kwargs:
+        kwargs["name"] = (kwargs["name"] or "").strip() or None
     for key, value in kwargs.items():
         if hasattr(task, key):
             setattr(task, key, value)

@@ -8,6 +8,7 @@ class ScheduledTask(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
     agent_id = db.Column(db.Integer, db.ForeignKey("agents.id"), nullable=False, index=True)
+    name = db.Column(db.String(255), nullable=True)
     task_type = db.Column(db.String(50), nullable=False)  # cron, heartbeat, one_shot
     schedule_expr = db.Column(db.String(100), nullable=True)  # cron expression
     timezone = db.Column(db.String(50), nullable=False, default="UTC")
@@ -32,6 +33,7 @@ class ScheduledTask(db.Model):
         return {
             "id": self.id,
             "agent_id": self.agent_id,
+            "name": self.name,
             "task_type": self.task_type,
             "schedule_expr": self.schedule_expr,
             "timezone": self.timezone,
