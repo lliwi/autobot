@@ -55,14 +55,58 @@
 <div class="section">
     <h2>Workspace Files</h2>
     <div class="tabs">
+        {% set editable = ['SOUL.md', 'AGENTS.md'] %}
         {% for name, content in workspace_files.items() %}
-        <details {% if loop.first %}open{% endif %}>
-            <summary>{{ name }}</summary>
+        <details {% if loop.first %}open{% endif %} id="ws-{{ name | replace('.','_') }}">
+            <summary style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+                <span>{{ name }}</span>
+                {% if name in editable %}
+                <button type="button" class="btn btn-sm"
+                        onclick="toggleWsEdit('{{ name | replace('.','_') }}'); event.preventDefault();">
+                    Edit
+                </button>
+                {% endif %}
+            </summary>
+
+            {% if name in editable %}
+            <div id="ws-view-{{ name | replace('.','_') }}">
+                <pre class="workspace-content">{{ content or '(empty)' }}</pre>
+            </div>
+            <div id="ws-edit-{{ name | replace('.','_') }}" style="display:none; margin-top:.5rem;">
+                <form method="POST"
+                      action="{{ url_for('dashboard.agent_workspace_file_save', agent_id=agent.id) }}">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="filename" value="{{ name }}">
+                    <textarea name="content"
+                              style="width:100%; min-height:420px; font-family:var(--mono); font-size:12px;
+                                     background:var(--bg-sunken); color:var(--fg); border:1px solid var(--border);
+                                     border-radius:var(--r-sm); padding:12px; resize:vertical;"
+                              spellcheck="false">{{ content or '' }}</textarea>
+                    <div style="margin-top:.5rem; display:flex; gap:.5rem;">
+                        <button type="submit" class="btn btn-primary btn-sm">Save</button>
+                        <button type="button" class="btn btn-sm"
+                                onclick="toggleWsEdit('{{ name | replace('.','_') }}')">Cancel</button>
+                    </div>
+                </form>
+            </div>
+            {% else %}
             <pre class="workspace-content">{{ content or '(empty)' }}</pre>
+            {% endif %}
         </details>
         {% endfor %}
     </div>
 </div>
+
+<script>
+function toggleWsEdit(key) {
+    const view = document.getElementById('ws-view-' + key);
+    const edit = document.getElementById('ws-edit-' + key);
+    if (!view || !edit) return;
+    const editing = edit.style.display !== 'none';
+    view.style.display = editing ? '' : 'none';
+    edit.style.display = editing ? 'none' : '';
+}
+</script>
 
 <div class="section">
     <h2>Recent Runs</h2>

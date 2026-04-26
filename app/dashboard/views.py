@@ -381,6 +381,29 @@ def agent_detail(agent_id):
     )
 
 
+@dashboard_bp.route("/agents/<int:agent_id>/workspace-file", methods=["POST"])
+@login_required
+def agent_workspace_file_save(agent_id):
+    """Save an editable workspace file (SOUL.md or AGENTS.md)."""
+    from app.workspace.manager import write_file
+
+    EDITABLE = {"SOUL.md", "AGENTS.md"}
+    agent = db.session.get(Agent, agent_id)
+    if agent is None:
+        flash("Agent not found.", "danger")
+        return redirect(url_for("dashboard.agents_list"))
+
+    filename = (request.form.get("filename") or "").strip()
+    if filename not in EDITABLE:
+        flash(f"'{filename}' is not editable here.", "danger")
+        return redirect(url_for("dashboard.agent_detail", agent_id=agent_id))
+
+    content = request.form.get("content") or ""
+    write_file(agent, filename, content)
+    flash(f"{filename} saved.", "success")
+    return redirect(url_for("dashboard.agent_detail", agent_id=agent_id))
+
+
 @dashboard_bp.route("/agents/<int:agent_id>/heartbeat")
 @login_required
 def agent_heartbeat(agent_id):
