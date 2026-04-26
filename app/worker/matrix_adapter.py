@@ -53,7 +53,9 @@ class MatrixBot:
             loop.close()
 
     async def _async_main(self):
-        from nio import AsyncClient, InviteMemberEvent, LoginResponse, MegolmEvent, RoomMessageText
+        from nio import (AsyncClient, InviteMemberEvent, LoginResponse,
+                         MegolmEvent, RoomMessageAudio, RoomMessageFile,
+                         RoomMessageText)
 
         homeserver = self.app.config["MATRIX_HOMESERVER"]
         user_id = self.app.config["MATRIX_USER_ID"]
@@ -98,6 +100,16 @@ class MatrixBot:
         client.add_event_callback(
             lambda room, event: self._handle_encrypted(client, room, event),
             MegolmEvent,
+        )
+
+        # Audio ingest — m.audio and m.file (audio/*) events
+        client.add_event_callback(
+            lambda room, event: self._handle_audio(client, room, event),
+            RoomMessageAudio,
+        )
+        client.add_event_callback(
+            lambda room, event: self._handle_audio(client, room, event),
+            RoomMessageFile,
         )
 
         # Restore sync token from Redis so we resume from where we left off
@@ -411,6 +423,56 @@ class MatrixBot:
             )
         except Exception as e:
             logger.error("Failed to send encryption redirect to %s: %s", room.room_id, e)
+
+    async def _handle_audio(self, client, room, event):
+        """Handle an incoming Matrix audio or audio-file message."""
+        if event.sender == client.user_id:
+            return
+
+        logger.debug("Matrix audio event from %s in %s", event.sender, room.room_id)
+
+        with self.app.app_context():
+            from app.services.matrix_audio_ingest import handle_audio_event, is_audio_event
+            from app.services.matrix_service import get_agent_for_room, is_dm_user_allowed, is_room_allowed, is_user_allowed
+
+            is_dm = room.member_count <= 2
+            if is_dm:
+                if not is_dm_user_allowed(event.sender):
+                    return
+            else:
+                if not is_room_allowed(room.room_id) or not is_user_allowed(event.sender):
+                    return
+
+            agent = get_agent_for_room(room.room_id)
+            if agent is None:
+                logger.warning("No active agent for audio in room %s", room.room_id)
+                return
+
+            logger.info(
+                "Matrix audio from %s in %s → agent %s",
+                event.sender, room.room_id, agent.slug,
+            )
+
+            try:
+                result = await handle_audio_event(event, room.room_id, agent, client)
+                if result is None:
+                    return  # not an audio event after type check
+                response_text = result.get("response", "")
+                if result.get("error"):
+                    response_text = response_text or f"Error al procesar el audio: {result['error']}"
+            except Exception as e:
+                logger.exception("Audio ingest failed for %s in %s", event.sender, room.room_id)
+                response_text = f"No he podido procesar el audio: {e}"
+
+            if response_text:
+                try:
+                    await client.room_send(
+                        room_id=room.room_id,
+                        message_type="m.room.message",
+                        content={"msgtype": "m.text", "body": response_text},
+                    )
+                except Exception as e:
+                    logger.error("Failed to send audio response: %s", e)
 
     async def _handle_message(self, client, room, event):
         """Handle an incoming Matrix message."""

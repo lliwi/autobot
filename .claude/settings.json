@@ -81,7 +81,11 @@
       "Bash(git -C /home/llibert/Documents/development/flask/autobot config --get remote.origin.url)",
       "Bash(git -C /home/llibert/Documents/development/flask/autobot config --get user.token)",
       "Bash(curl -s -X POST -H 'Accept: application/vnd.github+json' -H 'Authorization: Bearer __CMDSUB_OUTPUT__' https://api.github.com/repos/lliwi/autobot/issues/1/comments -d '{ *)",
-      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('Comment URL:', d.get\\('html_url', d.get\\('message', 'error'\\)\\)\\)\")"
+      "Bash(python3 -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\('Comment URL:', d.get\\('html_url', d.get\\('message', 'error'\\)\\)\\)\")",
+      "Bash(curl -s https://api.github.com/repos/lliwi/autobot/issues/3)",
+      "Bash(python3 -m json.tool)",
+      "Bash(curl -s https://api.github.com/repos/lliwi/autobot/issues/3/comments)",
+      "Bash(python3 -c \"from nio import RoomMessageAudio; print\\('ok'\\)\")"
     ],
     "additionalDirectories": [
       "/tmp"
