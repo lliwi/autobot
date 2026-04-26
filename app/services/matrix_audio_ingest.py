@@ -30,6 +30,13 @@ ALLOWED_EXTENSIONS = {
 
 def is_audio_event(event) -> bool:
     """Return True if *event* is an audio message the worker should ingest."""
+    # nio RoomMessageAudio always qualifies; RoomMessageFile only if audio/*
+    try:
+        from nio import RoomMessageAudio
+        if isinstance(event, RoomMessageAudio):
+            return True
+    except ImportError:
+        pass
     content = _content(event)
     msgtype = str(content.get("msgtype") or "")
     info = content.get("info") or {}
@@ -40,6 +47,10 @@ def is_audio_event(event) -> bool:
 
 
 def extract_mxc_url(event) -> str:
+    # nio exposes url directly on RoomMessageAudio / RoomMessageFile
+    direct_url = getattr(event, "url", None)
+    if direct_url and str(direct_url).startswith("mxc://"):
+        return str(direct_url)
     content = _content(event)
     if content.get("file"):
         raise ValueError(
@@ -182,17 +193,19 @@ async def handle_audio_event(event, room_id: str, agent, nio_client) -> dict | N
 # ── Internal helpers ──────────────────────────────────────────────────────────
 
 def _content(event) -> dict:
+    """Extract the content dict from a nio event or raw dict."""
     if isinstance(event, dict):
-        c = event.get("content") or {}
-    else:
-        c = getattr(event, "source", {}).get("content") or {}
-        if not c:
-            # nio events expose fields directly
-            c = {
-                "msgtype": getattr(event, "msgtype", None),
-                "url": getattr(event, "url", None),
-                "body": getattr(event, "body", None),
-                "info": getattr(event, "source", {}).get("content", {}).get("info"),
-                "file": getattr(event, "source", {}).get("content", {}).get("file"),
-            }
-    return c if isinstance(c, dict) else {}
+        return event.get("content") or {}
+    # nio RoomMessage* objects: 'source' contains the full raw event
+    source = getattr(event, "source", None) or {}
+    c = source.get("content") if isinstance(source, dict) else None
+    if c and isinstance(c, dict):
+        return c
+    # Fallback: build content from the event's own attributes
+    return {
+        "msgtype": getattr(event, "msgtype", None),
+        "url":     getattr(event, "url",     None),
+        "body":    getattr(event, "body",    None),
+        "info":    (source.get("content") or {}).get("info") if isinstance(source, dict) else None,
+        "file":    (source.get("content") or {}).get("file") if isinstance(source, dict) else None,
+    }
