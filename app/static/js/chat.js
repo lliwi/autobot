@@ -304,11 +304,25 @@ document.addEventListener('DOMContentLoaded', () => {
             }
         } catch (err) {
             if (err.name === 'AbortError') {
-                // User-initiated stop. Mark the partial response so it's
-                // visually obvious the turn didn't finish naturally.
                 contentSpan.textContent += '\n\n[stopped]';
             } else {
-                contentSpan.textContent += `\n[Error: ${err.message}]`;
+                // Network/connection error — the backend may have finished and
+                // saved its response even though the stream was interrupted.
+                // Show a friendly notice and try to recover from session history.
+                const isNetworkErr = err.message === 'Load failed' ||
+                    err.message === 'Failed to fetch' ||
+                    err.message === 'NetworkError when attempting to fetch resource.';
+
+                if (isNetworkErr) {
+                    contentSpan.dataset.raw = (contentSpan.dataset.raw || '') +
+                        '\n\n*Connection interrupted — checking if the response was saved…*';
+                    contentSpan.innerHTML = renderMarkdown(contentSpan.dataset.raw);
+                    scrollToBottom();
+                    // Wait briefly then check session history for a saved reply.
+                    await _recoverFromSession(assistantDiv, contentSpan);
+                } else {
+                    contentSpan.textContent += `\n[Error: ${err.message}]`;
+                }
             }
         } finally {
             abortController = null;
@@ -331,6 +345,42 @@ document.addEventListener('DOMContentLoaded', () => {
             chatForm.dispatchEvent(new Event('submit'));
         }
     });
+
+    async function _recoverFromSession(assistantDiv, contentSpan) {
+        if (!sessionId || !agentSelect.value) return;
+        // Poll up to 3 times (3 s apart) waiting for the backend to finish.
+        for (let attempt = 0; attempt < 3; attempt++) {
+            await new Promise(r => setTimeout(r, 3000));
+            try {
+                const res = await fetch(`/api/sessions/${sessionId}/messages`);
+                if (!res.ok) continue;
+                const msgs = await res.json();
+                // Find the last assistant message after the last user message.
+                let lastUserIdx = -1;
+                for (let i = msgs.length - 1; i >= 0; i--) {
+                    if (msgs[i].role === 'user') { lastUserIdx = i; break; }
+                }
+                const savedAssistant = msgs.slice(lastUserIdx + 1).find(m => m.role === 'assistant');
+                if (savedAssistant && savedAssistant.content) {
+                    // Replace the partial/error content with the saved response.
+                    contentSpan.dataset.raw = savedAssistant.content;
+                    contentSpan.innerHTML = renderMarkdown(savedAssistant.content);
+                    // Append a subtle note so the user knows it was recovered.
+                    const note = document.createElement('p');
+                    note.style.cssText = 'font-size:11px;color:var(--fg-dim);margin-top:6px;';
+                    note.textContent = '⚠ Connection was interrupted — response recovered from session.';
+                    assistantDiv.appendChild(note);
+                    scrollToBottom();
+                    return;
+                }
+            } catch (_) {}
+        }
+        // Backend didn't finish in time — replace placeholder with clear message.
+        contentSpan.dataset.raw = '';
+        contentSpan.innerHTML = '';
+        contentSpan.textContent = '[Connection lost — the backend may still be processing. Refresh the page to check, or resend your message.]';
+        scrollToBottom();
+    }
 
     function handleChunk(chunk, contentSpan) {
         switch (chunk.type) {

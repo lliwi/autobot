@@ -1,3 +1,6 @@
+import json
+import queue as _queue
+import threading
 from datetime import datetime, time, timezone
 
 from flask import Response, current_app, jsonify, request, stream_with_context
@@ -7,6 +10,10 @@ from app.api.middleware import auth_required
 from app.extensions import db
 from app.models.agent import Agent
 from app.models.session import Session
+
+# Keepalive interval in seconds. Must be well below any NAT/proxy idle timeout
+# (typical home routers: 30-300 s). 20 s is a safe default.
+_KEEPALIVE_INTERVAL = 20
 
 
 @api_bp.route("/chat", methods=["POST"])
@@ -18,13 +25,42 @@ def chat():
 
     from app.services.chat_service import stream_response
 
+    # Run the blocking agent loop in a background thread and feed chunks into
+    # a queue. The generator below reads from that queue with a timeout so it
+    # can send SSE keepalive comments while the agent is busy (LLM call or
+    # tool execution). This prevents NAT/proxy idle-timeout from killing the
+    # connection during long-running tasks.
+    chunk_q: _queue.Queue = _queue.Queue()
+    app = current_app._get_current_object()
+
+    def _worker():
+        try:
+            with app.app_context():
+                for chunk in stream_response(
+                    agent_id=data["agent_id"],
+                    message=data["message"],
+                    session_id=data.get("session_id"),
+                ):
+                    chunk_q.put(chunk)
+        except Exception as e:
+            chunk_q.put(json.dumps({"type": "error", "data": str(e)}))
+        finally:
+            chunk_q.put(None)  # sentinel
+
+    t = threading.Thread(target=_worker, daemon=True)
+    t.start()
+
     def generate():
-        for chunk in stream_response(
-            agent_id=data["agent_id"],
-            message=data["message"],
-            session_id=data.get("session_id"),
-        ):
-            yield f"data: {chunk}\n\n"
+        while True:
+            try:
+                chunk = chunk_q.get(timeout=_KEEPALIVE_INTERVAL)
+                if chunk is None:
+                    break
+                yield f"data: {chunk}\n\n"
+            except _queue.Empty:
+                # No data for _KEEPALIVE_INTERVAL seconds — send SSE comment
+                # to keep the TCP connection alive through NAT/proxies.
+                yield ": keepalive\n\n"
 
     return Response(
         stream_with_context(generate()),
