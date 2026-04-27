@@ -330,18 +330,59 @@
     </script>
     <script>
         (function () {
-            var toggle = document.getElementById('nav-toggle');
+            var toggle  = document.getElementById('nav-toggle');
             var overlay = document.getElementById('sidebar-overlay');
             var sidebar = document.querySelector('.sidebar');
-            if (!toggle || !sidebar) return;
-            function openNav()  { sidebar.classList.add('open'); overlay.classList.add('visible'); document.body.style.overflow = 'hidden'; }
-            function closeNav() { sidebar.classList.remove('open'); overlay.classList.remove('visible'); document.body.style.overflow = ''; }
+            var app     = document.querySelector('.app');
+            if (!toggle || !sidebar || !app) return;
+
+            var STORE_KEY = 'autobot-sidebar-collapsed';
+
+            function isMobile() { return window.innerWidth <= 768; }
+
+            /* ── Desktop: collapse / expand ─────────────────── */
+            function setCollapsed(on) {
+                app.classList.toggle('sidebar-collapsed', on);
+                try { localStorage.setItem(STORE_KEY, on ? '1' : '0'); } catch (e) {}
+            }
+
+            /* ── Mobile: drawer open / close ────────────────── */
+            function openDrawer()  {
+                sidebar.classList.add('open');
+                overlay.classList.add('visible');
+                document.body.style.overflow = 'hidden';
+            }
+            function closeDrawer() {
+                sidebar.classList.remove('open');
+                overlay.classList.remove('visible');
+                document.body.style.overflow = '';
+            }
+
+            /* Restore desktop collapsed state on load */
+            if (!isMobile()) {
+                try {
+                    if (localStorage.getItem(STORE_KEY) === '1') {
+                        app.classList.add('sidebar-collapsed');
+                    }
+                } catch (e) {}
+            }
+
             toggle.addEventListener('click', function () {
-                sidebar.classList.contains('open') ? closeNav() : openNav();
+                if (isMobile()) {
+                    sidebar.classList.contains('open') ? closeDrawer() : openDrawer();
+                } else {
+                    setCollapsed(!app.classList.contains('sidebar-collapsed'));
+                }
             });
-            overlay.addEventListener('click', closeNav);
+
+            overlay.addEventListener('click', closeDrawer);
             document.querySelectorAll('.nav-item').forEach(function (el) {
-                el.addEventListener('click', closeNav);
+                el.addEventListener('click', closeDrawer);
+            });
+
+            /* If window resizes from mobile → desktop, reset drawer state */
+            window.addEventListener('resize', function () {
+                if (!isMobile()) closeDrawer();
             });
         })();
     </script>

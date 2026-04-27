@@ -1199,9 +1199,11 @@ pre.code, pre {
    RESPONSIVE — mobile breakpoints
    ============================================================ */
 
-/* Hamburger: hidden on desktop, shown via media query */
+/* Hamburger: always visible — collapses sidebar on desktop, opens drawer on mobile */
 .nav-toggle {
-    display: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
     background: none;
     border: none;
     color: var(--fg);
@@ -1209,10 +1211,18 @@ pre.code, pre {
     padding: 6px;
     border-radius: var(--r-sm);
     flex-shrink: 0;
-    align-items: center;
-    justify-content: center;
+    opacity: 0.7;
+    transition: opacity 0.15s, background 0.15s;
 }
-.nav-toggle:hover { background: var(--bg-raised); }
+.nav-toggle:hover { background: var(--bg-raised); opacity: 1; }
+
+/* Desktop: sidebar fully hidden when collapsed */
+.app.sidebar-collapsed {
+    grid-template-columns: 1fr;
+}
+.app.sidebar-collapsed .sidebar {
+    display: none;
+}
 
 /* Overlay behind open sidebar */
 .sidebar-overlay {
@@ -1255,8 +1265,7 @@ pre.code, pre {
     }
     .sidebar.open { transform: translateX(0); }
 
-    /* Show hamburger in header */
-    .nav-toggle { display: flex; }
+    /* Header sticky on mobile */
     .header {
         position: sticky;
         top: 0;
