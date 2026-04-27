@@ -265,8 +265,16 @@
             </div>
         </aside>
 
+        <div class="sidebar-overlay" id="sidebar-overlay"></div>
+
         <div class="main">
             <div class="header">
+                <button class="nav-toggle" id="nav-toggle" aria-label="Menú" title="Abrir navegación">
+                    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+                        <line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/>
+                        <line x1="3" y1="18" x2="21" y2="18"/>
+                    </svg>
+                </button>
                 <div class="crumb">
                     <span>{{ crumb[0] }}</span>
                     <span class="sep">/</span>
@@ -317,6 +325,23 @@
                 document.documentElement.setAttribute('data-theme', next);
                 try { localStorage.setItem('autobot-theme', next); } catch (e) {}
                 sync();
+            });
+        })();
+    </script>
+    <script>
+        (function () {
+            var toggle = document.getElementById('nav-toggle');
+            var overlay = document.getElementById('sidebar-overlay');
+            var sidebar = document.querySelector('.sidebar');
+            if (!toggle || !sidebar) return;
+            function openNav()  { sidebar.classList.add('open'); overlay.classList.add('visible'); document.body.style.overflow = 'hidden'; }
+            function closeNav() { sidebar.classList.remove('open'); overlay.classList.remove('visible'); document.body.style.overflow = ''; }
+            toggle.addEventListener('click', function () {
+                sidebar.classList.contains('open') ? closeNav() : openNav();
+            });
+            overlay.addEventListener('click', closeNav);
+            document.querySelectorAll('.nav-item').forEach(function (el) {
+                el.addEventListener('click', closeNav);
             });
         })();
     </script>

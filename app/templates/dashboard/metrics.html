@@ -219,7 +219,7 @@ loadCodexQuota();
 <style>
 .metrics-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(400px, 100%), 1fr));
     gap: 1.5rem;
     margin-top: 1rem;
 }
@@ -255,7 +255,7 @@ loadCodexQuota();
 }
 .codex-quota-bars {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
     gap: 1.25rem;
 }
 .quota-row-head, .quota-row-foot {
