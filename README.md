@@ -392,6 +392,94 @@ feedback del reviewer. `review_token_budget_daily` limita el gasto diario en aud
 (cuando se supera, el review_gate se cierra hasta el siguiente día UTC). Todo queda auditado en
 `review_events`.
 
+## Promover tools/skills a la instalación base
+
+Una vez que una tool o skill lleva tiempo funcionando en producción —con sus patches aplicados y validados— el admin puede **promoverla a la plantilla por defecto** (`workspaces/_template/`). Los agentes creados a partir de ese momento heredarán la tool/skill automáticamente al ejecutar `scaffold_workspace`.
+
+El mecanismo tiene tres niveles:
+
+### Nivel 1 — Bundle descargable (siempre disponible)
+
+Genera un `tar.gz` listo para revisar y abrir un PR manualmente:
+
+- `workspaces/_template/<tools|skills>/<slug>/` — ficheros de la tool/skill con su estado actual post-patches
+- `PROMOTION.md` — metadatos: agente origen, versión, número de patches aplicados, resultado de validación, instrucciones de test
+- `promote.patch` — diff unificado contra lo que ya hay en `_template/` (vacío si es nueva)
+
+Desde el dashboard (admin): **Agents → Tools/Skills del agente → `📦 Bundle`**
+
+Desde la API:
+```bash
+curl -X POST /api/admin/promote/bundle \
+  -H "Content-Type: application/json" \
+  -d '{"type": "tool", "agent_id": 1, "slug": "mi-tool"}'
+# Retorna {"ok": true, "bundle_name": "mi-tool-20260427.tar.gz", "diff": "...", "pr_title": "...", "pr_body": "..."}
+
+# Descargar el bundle
+curl /api/admin/promote/bundle/mi-tool-20260427.tar.gz -o promotion.tar.gz
+```
+
+Con el bundle descargado, aplicar al repo y crear el PR:
+```bash
+tar -xzf promotion.tar.gz          # extrae en workspaces/_template/tools/mi-tool/
+git checkout -b promote/tool/mi-tool
+git add workspaces/_template/
+git commit -m "promote(tool): mi-tool v1.2"
+gh pr create --title "promote(tool): mi-tool" --body "$(cat PROMOTION.md)"
+```
+
+### Nivel 2 — PR automático en GitHub (requiere `gh_token`)
+
+Si hay un token de GitHub configurado, la app crea la rama, hace el commit y abre el PR directamente.
+
+**Configurar el token** (una de las dos vías):
+
+| Vía | Cómo |
+|---|---|
+| Credencial cifrada (recomendado) | Dashboard → **Credentials → New** → nombre `gh_token`, tipo `token`, scope global |
+| Variable de entorno | `GH_TOKEN=ghp_xxx` en `.env` (o `AUTOBOT_CRED_GH_TOKEN=ghp_xxx`) |
+
+El sistema busca en este orden: credencial `gh_token` en BD → `AUTOBOT_CRED_GH_TOKEN` en env → `GH_TOKEN` en env.
+
+Desde el dashboard (admin): **Agents → Tools/Skills del agente → `🔀 PR`**
+
+Desde la API:
+```bash
+curl -X POST /api/admin/promote/pr \
+  -H "Content-Type: application/json" \
+  -d '{"type": "skill", "agent_id": 2, "slug": "mi-skill"}'
+# Retorna {"ok": true, "pr_url": "https://github.com/lliwi/autobot/pull/42", "branch": "promote/skill/mi-skill"}
+```
+
+La rama creada sigue el patrón `promote/<type>/<slug>`. Si ya existe, se añade un sufijo de timestamp.
+
+### Nivel 3 — Broadcast a todos los agentes existentes
+
+Además de actualizar `_template/`, copia la tool/skill a todos los agentes que no la tengan:
+
+```bash
+curl -X POST /api/admin/promote/broadcast \
+  -H "Content-Type: application/json" \
+  -d '{"type": "tool", "agent_id": 1, "slug": "mi-tool"}'
+# Retorna {"ok": true, "broadcast_copied": 3, "broadcast_errors": ["otro-agente: already has tool"]}
+```
+
+Los errores de slug duplicado se acumulan en `broadcast_errors` sin interrumpir el proceso.
+
+### Estado en el dashboard
+
+La columna **Template** en la lista de tools/skills muestra `★ En template` cuando el slug ya existe en `_template/`, o `☆ No promovida` si aún no se ha promovido. Los botones de promoción sólo son visibles para admins.
+
+### Validación previa
+
+Antes de generar el bundle o el PR, la tool/skill pasa por los mismos checks que los patches:
+- JSON parseable y con forma válida de manifiesto
+- Sintaxis Python correcta (AST)
+- Presencia del `def handler(...)` (tools)
+- Smoke import en subprocess (usando el venv del workspace)
+
+Si alguno falla, la operación se cancela con el error detallado.
+
 ## API
 
 ### Auth
@@ -463,6 +551,13 @@ feedback del reviewer. `review_token_budget_daily` limita el gasto diario en aud
 - `POST /api/tools/:id/toggle` — Activar/desactivar
 - `POST /api/tools/:id/test` — Ejecutar tool con input de prueba
 - `POST /api/tools/sync` — Sincronizar tools del workspace con BD
+
+### Promoción a plantilla (admin)
+- `GET /api/admin/promote/status?type=tool|skill&slug=...` — Estado de promoción (en template, rama activa)
+- `POST /api/admin/promote/bundle` — Generar bundle descargable (`{"type", "agent_id", "slug"}`)
+- `GET /api/admin/promote/bundle/<filename>` — Descargar bundle generado
+- `POST /api/admin/promote/pr` — Crear PR en GitHub automáticamente (`{"type", "agent_id", "slug"}`)
+- `POST /api/admin/promote/broadcast` — Copiar a todos los agentes existentes (`{"type", "agent_id", "slug"}`)
 
 ### Credenciales
 - `GET /api/credentials` — Listar (metadata + preview redactado)
@@ -552,6 +647,7 @@ qué hizo el scheduler, el Matrix adapter y el runtime del agente.
 - [x] **Gestión de contexto**: token budget con `tiktoken`, drop-oldest, workspace index lazy-loaded, indicador de uso en chat
 - [x] **Chat markdown**: render seguro con marked + DOMPurify
 - [x] **Portabilidad**: `flask export-bundle` / `flask import-bundle` para clonar una instalación entera
+- [x] **Promoción a plantilla**: tools y skills probadas en producción se promueven a `workspaces/_template/` vía bundle descargable o PR automático en GitHub (`gh_token` desde credenciales cifradas o env); broadcast opcional a todos los agentes existentes
 - [x] **Logs centralizados**: ring buffer Redis compartido web+worker, vista `Observability → Logs` con filtros + auto-refresh
 - [x] **Tests del core (bootstrap)**: suite `tests/` con 67 casos en pytest cubriendo `patch_validator` (JSON/AST/handler/smoke-import), `security_policy` (clasificación L1/L2/L3), `approval_rule_service` (patrones + CRUD) y `patch_service` (propose/approve/apply/reject/rollback, no-op, dedup, rate-limit). Se ejecutan con `docker compose run --rm web pytest`.
 - [ ] **Fase 6 — Hardening** (pendiente):

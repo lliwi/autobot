@@ -23,6 +23,7 @@
             <th>Source</th>
             <th>Description</th>
             <th>Status</th>
+            <th>Template</th>
             <th>Actions</th>
         </tr>
     </thead>
@@ -35,6 +36,13 @@
             <td>{{ skill.description or '-' }}</td>
             <td><span class="badge badge-{{ 'active' if skill.enabled else 'inactive' }}">{{ 'Enabled' if skill.enabled else 'Disabled' }}</span></td>
             <td>
+                {% if skill.slug in promoted_slugs %}
+                    <span class="badge badge-active" title="Ya incluida en _template/">&#9733; En template</span>
+                {% else %}
+                    <span class="badge badge-inactive">&#9734; No promovida</span>
+                {% endif %}
+            </td>
+            <td>
                 <form method="POST" action="{{ url_for('dashboard.skill_toggle', skill_id=skill.id) }}" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-sm">{{ 'Disable' if skill.enabled else 'Enable' }}</button>
@@ -43,6 +51,16 @@
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-sm">Reload</button>
                 </form>
+                {% if is_admin %}
+                <form method="POST" action="{{ url_for('dashboard.skill_promote_bundle', skill_id=skill.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm" title="Descargar bundle listo para PR manual">&#128230; Bundle</button>
+                </form>
+                <form method="POST" action="{{ url_for('dashboard.skill_promote_pr', skill_id=skill.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm" title="Crear PR en GitHub (requiere GH_TOKEN)">&#128260; PR</button>
+                </form>
+                {% endif %}
             </td>
         </tr>
         {% endfor %}

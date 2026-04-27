@@ -23,6 +23,7 @@
             <th>Source</th>
             <th>Timeout</th>
             <th>Status</th>
+            <th>Template</th>
             <th>Actions</th>
         </tr>
     </thead>
@@ -39,6 +40,13 @@
             <td>{{ tool.timeout or '-' }}s</td>
             <td><span class="badge badge-{{ 'active' if tool.enabled else 'inactive' }}">{{ 'Enabled' if tool.enabled else 'Disabled' }}</span></td>
             <td>
+                {% if tool.slug in promoted_slugs %}
+                    <span class="badge badge-active" title="Ya incluida en _template/">&#9733; En template</span>
+                {% else %}
+                    <span class="badge badge-inactive">&#9734; No promovida</span>
+                {% endif %}
+            </td>
+            <td>
                 <form method="POST" action="{{ url_for('dashboard.tool_toggle', tool_id=tool.id) }}" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-sm">{{ 'Disable' if tool.enabled else 'Enable' }}</button>
@@ -47,6 +55,16 @@
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-sm">Test</button>
                 </form>
+                {% if is_admin %}
+                <form method="POST" action="{{ url_for('dashboard.tool_promote_bundle', tool_id=tool.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm" title="Descargar bundle listo para PR manual">&#128230; Bundle</button>
+                </form>
+                <form method="POST" action="{{ url_for('dashboard.tool_promote_pr', tool_id=tool.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm" title="Crear PR en GitHub (requiere GH_TOKEN)">&#128260; PR</button>
+                </form>
+                {% endif %}
             </td>
         </tr>
         {% endfor %}

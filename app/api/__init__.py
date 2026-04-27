@@ -7,4 +7,4 @@ from app.extensions import csrf
 
 csrf.exempt(api_bp)
 
-from app.api import auth, agents, chat, runs, scheduler, metrics, skills, tools, subagents, patches, errors  # noqa: E402, F401
+from app.api import auth, agents, chat, runs, scheduler, metrics, skills, tools, subagents, patches, errors, promote  # noqa: E402, F401

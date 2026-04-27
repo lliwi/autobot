@@ -9,7 +9,7 @@ def _base_path():
     return Path(current_app.config["WORKSPACES_BASE_PATH"]).resolve()
 
 
-def _template_path():
+def get_template_path():
     return Path(__file__).resolve().parent.parent.parent / "workspaces" / "_template"
 
 
@@ -23,7 +23,7 @@ def scaffold_workspace(slug):
     workspace = _base_path() / slug
     workspace.mkdir(parents=True, exist_ok=True)
 
-    template = _template_path()
+    template = get_template_path()
     if template.exists():
         for src in template.iterdir():
             dest = workspace / src.name

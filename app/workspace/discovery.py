@@ -113,6 +113,7 @@ def sync_tools_to_db(agent):
     results = []
     for td in discovered:
         tool = existing_map.get(td["slug"])
+        is_new = tool is None
         if tool:
             tool.name = td["name"]
             tool.description = td["description"]
@@ -135,6 +136,10 @@ def sync_tools_to_db(agent):
             )
             db.session.add(tool)
         results.append(tool)
+
+        # Register packages from requirements.txt for new tools (or if file appeared)
+        tool_dir = get_workspace_path(agent) / td["path"]
+        _register_requirements(agent, tool_dir)
 
     # Disable tools whose directory was removed
     for slug, tool in existing_map.items():
@@ -177,6 +182,10 @@ def sync_skills_to_db(agent):
             db.session.add(skill)
         results.append(skill)
 
+        # Register packages from requirements.txt
+        skill_dir = get_workspace_path(agent) / sd["path"]
+        _register_requirements(agent, skill_dir)
+
     # Disable skills whose directory was removed
     for slug, skill in existing_map.items():
         if slug not in discovered_slugs:
@@ -184,6 +193,34 @@ def sync_skills_to_db(agent):
 
     db.session.commit()
     return results
+
+
+def _register_requirements(agent, item_dir: Path) -> None:
+    """Register packages from requirements.txt that are not yet installed."""
+    req_file = item_dir / "requirements.txt"
+    if not req_file.exists():
+        return
+
+    from app.models.package_installation import PackageInstallation
+    from app.services.package_service import request_install
+
+    for line in req_file.read_text(encoding="utf-8").splitlines():
+        spec = line.strip()
+        if not spec or spec.startswith("#"):
+            continue
+        try:
+            # Only request if not already installed
+            from app.services.package_service import _normalise_name, parse_spec
+            name, _ = parse_spec(spec)
+            existing = PackageInstallation.query.filter_by(
+                agent_id=agent.id, name=name
+            ).first()
+            if existing and existing.status == "installed":
+                continue
+            request_install(agent, spec)
+        except Exception as e:
+            logger.warning("Could not register requirement '%s' for agent %s: %s",
+                           spec, agent.slug, e)
 
 
 # -- Dynamic tool loading --
