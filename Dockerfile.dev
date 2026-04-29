@@ -3,8 +3,9 @@ FROM python:3.11-slim
 WORKDIR /app
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libpq-dev libolm-dev && \
-    rm -rf /var/lib/apt/lists/*
+    gcc libpq-dev libolm-dev git && \
+    rm -rf /var/lib/apt/lists/* && \
+    git config --global --add safe.directory /app
 
 COPY pyproject.toml .
 # Create minimal setup for editable install

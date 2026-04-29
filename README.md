@@ -694,8 +694,4 @@ qué hizo el scheduler, el Matrix adapter y el runtime del agente.
 - [x] **Rate-limit en APIs sensibles**: `flask-limiter` con backend Redis aplicado a `/api/auth/login` (10/min, 30/h) y `/api/chat` (30/min); respuesta 429 JSON en todas las APIs
 - [x] **Historial de ficheros de workspace**: `SOUL.md` y `AGENTS.md` versionados automáticamente en cada guardado desde el dashboard; diff coloreado entre versiones y restauración reversible con un clic (`workspace_file_versions`)
 - [x] **Tests del core (bootstrap)**: suite `tests/` con 67 casos en pytest cubriendo `patch_validator` (JSON/AST/handler/smoke-import), `security_policy` (clasificación L1/L2/L3), `approval_rule_service` (patrones + CRUD) y `patch_service` (propose/approve/apply/reject/rollback, no-op, dedup, rate-limit). Se ejecutan con `docker compose run --rm web pytest`.
-- [ ] **Fase 6 — Hardening** (pendiente):
-    - **Ampliar cobertura de tests**: la suite base ya corre en verde. Queda extenderla a `scheduler_service` (cron + heartbeat), `agent_runner` (tool rounds, context budget), `review_service` (effort dial, sampling) y a un flow de integración end-to-end del chat SSE con runtime mockeado.
-    - **Sandbox real de ejecución**: workspace tools corren hoy en un venv por agente pero comparten filesystem/red/CPU del contenedor. Aislar con un contenedor efímero (Docker-in-Docker o `firecracker`/`bwrap`), network egress controlado, cuotas de CPU/memoria/filesystem.
-    - ~~**Límites finos por agente**~~
-    - ~~**Auditoría firmada**~~
+- [x] **Fase 6 — Hardening**: completada
