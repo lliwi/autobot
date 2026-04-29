@@ -2,16 +2,19 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
+# System deps — separate layer so it only rebuilds when this RUN changes
 RUN apt-get update && apt-get install -y --no-install-recommends \
     gcc libpq-dev libolm-dev git && \
     rm -rf /var/lib/apt/lists/* && \
     git config --global --add safe.directory /app
 
+# Python deps — copy only the dependency manifest first so this layer is
+# invalidated only when dependencies change, not on every code change.
 COPY pyproject.toml .
-# Create minimal setup for editable install
-RUN mkdir -p app && touch app/__init__.py
-RUN pip install --no-cache-dir -e ".[dev]"
+RUN mkdir -p app && touch app/__init__.py && \
+    pip install --no-cache-dir -e ".[dev]"
 
+# Source — copied last; changes here don't invalidate the layers above
 COPY . .
 
 ENV FLASK_APP=wsgi.py
