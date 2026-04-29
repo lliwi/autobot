@@ -1,6 +1,12 @@
 from flask import jsonify
+from flask_limiter.errors import RateLimitExceeded
 
 from app.api import api_bp
+
+
+@api_bp.errorhandler(RateLimitExceeded)
+def rate_limited(e):
+    return jsonify(error="Too many requests", detail=str(e.description), status=429), 429
 
 
 @api_bp.errorhandler(400)

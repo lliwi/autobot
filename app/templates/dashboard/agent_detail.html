@@ -61,10 +61,14 @@
             <summary style="display:flex; align-items:center; justify-content:space-between; gap:1rem;">
                 <span>{{ name }}</span>
                 {% if name in editable %}
-                <button type="button" class="btn btn-sm"
-                        onclick="toggleWsEdit('{{ name | replace('.','_') }}'); event.preventDefault();">
-                    Edit
-                </button>
+                <div style="display:flex; gap:.4rem;">
+                    <button type="button" class="btn btn-sm"
+                            onclick="toggleWsEdit('{{ name | replace('.','_') }}'); event.preventDefault();">
+                        Edit
+                    </button>
+                    <a href="{{ url_for('dashboard.agent_workspace_file_history', agent_id=agent.id, filename=name) }}"
+                       class="btn btn-sm" onclick="event.stopPropagation();">Historial</a>
+                </div>
                 {% endif %}
             </summary>
 

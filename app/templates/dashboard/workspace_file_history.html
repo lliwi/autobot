@@ -1,0 +1,103 @@
+{% extends "base.html" %}
+
+{% block title %}{{ filename }} history — {{ agent.name }} - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>{{ filename }} — historial</h1>
+    <a href="{{ url_for('dashboard.agent_detail', agent_id=agent.id) }}" class="btn">← {{ agent.name }}</a>
+</div>
+
+{% if not versions %}
+<p class="empty-state">Sin versiones guardadas todavía. El historial se crea al guardar cambios desde el panel del agente.</p>
+{% else %}
+<p style="color:var(--fg-muted); margin-bottom:1.5rem;">
+    {{ versions|length }} versión{{ 'es' if versions|length != 1 else '' }} guardada{{ 's' if versions|length != 1 else '' }}.
+    Cada diff muestra lo que cambió respecto a esa versión para llegar al estado siguiente.
+</p>
+
+{% for version in versions %}
+<div class="section" id="v{{ version.id }}">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:1rem; flex-wrap:wrap;">
+        <div>
+            <strong>v{{ loop.revindex }}</strong>
+            <span style="color:var(--fg-muted); margin-left:.75rem;">
+                {{ version.saved_at.strftime('%Y-%m-%d %H:%M UTC') }}
+            </span>
+            {% if version.saved_by %}
+            <span style="color:var(--fg-muted); margin-left:.5rem;">· {{ version.saved_by.email }}</span>
+            {% endif %}
+        </div>
+        <div style="display:flex; gap:.5rem; flex-wrap:wrap;">
+            <button type="button" class="btn btn-sm"
+                    onclick="toggleDiff('diff-{{ version.id }}')">Ver diff</button>
+            <button type="button" class="btn btn-sm"
+                    onclick="toggleContent('raw-{{ version.id }}')">Ver contenido</button>
+            <form method="POST"
+                  action="{{ url_for('dashboard.agent_workspace_file_restore', agent_id=agent.id, filename=filename, version_id=version.id) }}"
+                  onsubmit="return confirm('¿Restaurar {{ filename }} a esta versión? El estado actual se guardará como nueva versión.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                <button type="submit" class="btn btn-sm btn-warning">Restaurar</button>
+            </form>
+        </div>
+    </div>
+
+    <div id="diff-{{ version.id }}" style="display:none; margin-top:.75rem;">
+        {% if diffs[loop.index0] %}
+        <pre class="workspace-content diff-view">{{ diffs[loop.index0] }}</pre>
+        {% else %}
+        <p class="empty-state" style="margin:.5rem 0;">Sin cambios detectables respecto a la versión anterior.</p>
+        {% endif %}
+    </div>
+
+    <div id="raw-{{ version.id }}" style="display:none; margin-top:.75rem;">
+        <pre class="workspace-content">{{ version.content or '(vacío)' }}</pre>
+    </div>
+</div>
+{% endfor %}
+{% endif %}
+
+<style>
+.diff-view .line-add  { color: var(--green, #3fb950); }
+.diff-view .line-del  { color: var(--red,   #f85149); }
+.diff-view .line-meta { color: var(--fg-muted); }
+
+.btn-warning {
+    background: var(--amber, #d29922);
+    color: #000;
+    border-color: var(--amber, #d29922);
+}
+.btn-warning:hover { filter: brightness(1.1); }
+</style>
+
+<script>
+function toggleDiff(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+function toggleContent(id) {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.style.display = el.style.display === 'none' ? '' : 'none';
+}
+
+// Colorize unified diff lines
+document.querySelectorAll('.diff-view').forEach(pre => {
+    const lines = pre.textContent.split('\n');
+    pre.innerHTML = lines.map(line => {
+        if (line.startsWith('+') && !line.startsWith('+++'))
+            return `<span class="line-add">${escHtml(line)}</span>`;
+        if (line.startsWith('-') && !line.startsWith('---'))
+            return `<span class="line-del">${escHtml(line)}</span>`;
+        if (line.startsWith('@@') || line.startsWith('---') || line.startsWith('+++'))
+            return `<span class="line-meta">${escHtml(line)}</span>`;
+        return escHtml(line);
+    }).join('\n');
+});
+
+function escHtml(s) {
+    return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+</script>
+{% endblock %}

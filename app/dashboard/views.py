@@ -384,8 +384,9 @@ def agent_detail(agent_id):
 @dashboard_bp.route("/agents/<int:agent_id>/workspace-file", methods=["POST"])
 @login_required
 def agent_workspace_file_save(agent_id):
-    """Save an editable workspace file (SOUL.md or AGENTS.md)."""
-    from app.workspace.manager import write_file
+    """Save an editable workspace file (SOUL.md or AGENTS.md) and snapshot the previous version."""
+    from app.models.workspace_file_version import WorkspaceFileVersion
+    from app.workspace.manager import read_file, write_file
 
     EDITABLE = {"SOUL.md", "AGENTS.md"}
     agent = db.session.get(Agent, agent_id)
@@ -398,9 +399,103 @@ def agent_workspace_file_save(agent_id):
         flash(f"'{filename}' is not editable here.", "danger")
         return redirect(url_for("dashboard.agent_detail", agent_id=agent_id))
 
-    content = request.form.get("content") or ""
-    write_file(agent, filename, content)
+    new_content = request.form.get("content") or ""
+
+    # Snapshot the current content before overwriting
+    current = read_file(agent, filename) or ""
+    if current != new_content:
+        db.session.add(WorkspaceFileVersion(
+            agent_id=agent.id,
+            filename=filename,
+            content=current,
+            saved_by_user_id=current_user.id,
+        ))
+        db.session.commit()
+
+    write_file(agent, filename, new_content)
     flash(f"{filename} saved.", "success")
+    return redirect(url_for("dashboard.agent_detail", agent_id=agent_id))
+
+
+@dashboard_bp.route("/agents/<int:agent_id>/workspace-file/<filename>/history")
+@login_required
+def agent_workspace_file_history(agent_id, filename):
+    """Show version history for a workspace file."""
+    import difflib
+    from app.models.workspace_file_version import WorkspaceFileVersion
+    from app.workspace.manager import read_file
+
+    EDITABLE = {"SOUL.md", "AGENTS.md"}
+    agent = db.session.get(Agent, agent_id)
+    if agent is None or filename not in EDITABLE:
+        flash("Not found.", "danger")
+        return redirect(url_for("dashboard.agents_list"))
+
+    versions = (
+        WorkspaceFileVersion.query
+        .filter_by(agent_id=agent_id, filename=filename)
+        .order_by(WorkspaceFileVersion.saved_at.desc())
+        .limit(50)
+        .all()
+    )
+
+    current_content = read_file(agent, filename) or ""
+
+    # Build diffs: each entry shows what changed going from that version → the next newer one
+    contents = [current_content] + [v.content for v in versions]
+    diffs = []
+    for i, version in enumerate(versions):
+        newer = contents[i]
+        older = contents[i + 1]
+        diff = list(difflib.unified_diff(
+            older.splitlines(keepends=True),
+            newer.splitlines(keepends=True),
+            fromfile=f"v{len(versions) - i} (saved)",
+            tofile=f"v{len(versions) - i + 1}" if i > 0 else "current",
+            lineterm="",
+        ))
+        diffs.append("".join(diff))
+
+    return render_template(
+        "dashboard/workspace_file_history.html",
+        agent=agent,
+        filename=filename,
+        versions=versions,
+        diffs=diffs,
+        current_content=current_content,
+    )
+
+
+@dashboard_bp.route(
+    "/agents/<int:agent_id>/workspace-file/<filename>/restore/<int:version_id>",
+    methods=["POST"],
+)
+@login_required
+def agent_workspace_file_restore(agent_id, filename, version_id):
+    """Restore a workspace file to a previously saved version."""
+    from app.models.workspace_file_version import WorkspaceFileVersion
+    from app.workspace.manager import read_file, write_file
+
+    EDITABLE = {"SOUL.md", "AGENTS.md"}
+    agent = db.session.get(Agent, agent_id)
+    version = db.session.get(WorkspaceFileVersion, version_id)
+
+    if agent is None or filename not in EDITABLE or version is None or version.agent_id != agent_id:
+        flash("Not found.", "danger")
+        return redirect(url_for("dashboard.agents_list"))
+
+    # Snapshot current before restoring
+    current = read_file(agent, filename) or ""
+    db.session.add(WorkspaceFileVersion(
+        agent_id=agent.id,
+        filename=filename,
+        content=current,
+        saved_by_user_id=current_user.id,
+    ))
+    db.session.commit()
+
+    write_file(agent, filename, version.content)
+    flash(f"{filename} restored to version from {version.saved_at.strftime('%Y-%m-%d %H:%M UTC')}.", "success")
     return redirect(url_for("dashboard.agent_detail", agent_id=agent_id))
 
 

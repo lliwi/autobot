@@ -3,11 +3,12 @@ from flask_login import current_user, login_user, logout_user
 
 from app.api import api_bp
 from app.api.middleware import auth_required
-from app.extensions import db
+from app.extensions import db, limiter
 from app.models.user import User
 
 
 @api_bp.route("/auth/login", methods=["POST"])
+@limiter.limit("10 per minute; 30 per hour")
 def api_login():
     data = request.get_json()
     if not data or "email" not in data or "password" not in data:

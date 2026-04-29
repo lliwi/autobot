@@ -7,7 +7,7 @@ from flask import Response, current_app, jsonify, request, stream_with_context
 
 from app.api import api_bp
 from app.api.middleware import auth_required
-from app.extensions import db
+from app.extensions import db, limiter
 from app.models.agent import Agent
 from app.models.session import Session
 
@@ -18,6 +18,7 @@ _KEEPALIVE_INTERVAL = 20
 
 @api_bp.route("/chat", methods=["POST"])
 @auth_required
+@limiter.limit("30 per minute")
 def chat():
     data = request.get_json()
     if not data or "agent_id" not in data or "message" not in data:

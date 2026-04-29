@@ -64,6 +64,10 @@ class Config:
     # Rate limiting
     RATELIMIT_STORAGE_URI = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
 
+    # Cost alert: if today's estimated cost (USD) reaches this threshold an
+    # alert banner is shown on the Metrics dashboard. Leave unset to disable.
+    COST_ALERT_EUR_DAILY = os.environ.get("COST_ALERT_EUR_DAILY") or None
+
     # Per-workspace Python environment.
     #   * PACKAGE_ALLOWLIST: comma-separated pypi names that auto-install. Others
     #     need admin approval from the dashboard.

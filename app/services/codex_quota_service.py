@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from datetime import datetime, timezone
 
+import httpx
+
 from app.extensions import db
 from app.models.codex_quota_snapshot import CodexQuotaSnapshot
 
@@ -118,6 +120,55 @@ def _iso(dt: datetime | None) -> str | None:
     if dt.tzinfo is None:
         dt = dt.replace(tzinfo=timezone.utc)
     return dt.isoformat()
+
+
+def refresh_quota() -> bool:
+    """Make a minimal non-streaming call to the Codex responses endpoint to
+    capture fresh quota headers and persist them. Returns True if updated.
+
+    Uses the shortest possible prompt (a single space) with max_output_tokens=1
+    so the inference cost is negligible — just enough for the backend to return
+    the x-codex-* rate-limit headers.
+    """
+    from app.runtime.model_client import CODEX_RESPONSES_URL, DEFAULT_MODEL
+    from app.services import codex_auth as _auth
+
+    if not _auth.is_logged_in():
+        return False
+    try:
+        token = _auth.get_access_token()
+        account_id = _auth.get_account_id() or ""
+        body = {
+            "model": DEFAULT_MODEL,
+            "store": False,
+            "stream": True,
+            "instructions": "",
+            "input": [{"role": "user", "content": [{"type": "input_text", "text": "."}]}],
+        }
+        req_headers = {
+            "Authorization": f"Bearer {token}",
+            "chatgpt-account-id": account_id,
+            "OpenAI-Beta": "responses=experimental",
+            "originator": _auth.ORIGINATOR,
+            "content-type": "application/json",
+            "accept": "text/event-stream",
+        }
+        # The quota headers arrive with the HTTP response before any body bytes,
+        # so we can close the stream immediately after reading them.
+        with httpx.Client(timeout=15.0) as client:
+            with client.stream("POST", CODEX_RESPONSES_URL, json=body, headers=req_headers) as resp:
+                if resp.status_code != 200:
+                    return False
+                quota_headers = {
+                    k: v for k, v in resp.headers.items()
+                    if isinstance(k, str) and k.lower().startswith("x-codex-")
+                }
+        if quota_headers:
+            save_snapshot(quota_headers)
+            return True
+    except Exception as e:
+        logger.warning("Quota refresh failed: %s", e)
+    return False
 
 
 def get_latest_snapshot() -> dict | None:

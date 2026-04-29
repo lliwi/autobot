@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from flask import Flask
 
 from app.config import config
-from app.extensions import bcrypt, csrf, db, login_manager, migrate
+from app.extensions import bcrypt, csrf, db, limiter, login_manager, migrate
 from app.logging_config import configure_logging
 
 
@@ -21,6 +21,7 @@ def create_app(config_name=None):
     login_manager.init_app(app)
     bcrypt.init_app(app)
     csrf.init_app(app)
+    limiter.init_app(app)
 
     configure_logging(app)
     register_template_filters(app)

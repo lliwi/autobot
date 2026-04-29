@@ -15,3 +15,4 @@ from app.models.credential import Credential  # noqa: F401
 from app.models.codex_quota_snapshot import CodexQuotaSnapshot  # noqa: F401
 from app.models.package_installation import PackageInstallation  # noqa: F401
 from app.models.review_event import ReviewEvent  # noqa: F401
+from app.models.workspace_file_version import WorkspaceFileVersion  # noqa: F401

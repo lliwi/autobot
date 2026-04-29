@@ -22,6 +22,14 @@
     <div class="codex-quota-bars" id="codex-quota-bars"></div>
 </div>
 
+<div class="card cost-summary-card" id="cost-summary-card" style="display:none;">
+    <div class="cost-summary-header">
+        <h3>Coste estimado (USD)</h3>
+        <span id="cost-alert-badge" style="display:none;" class="badge badge-error">⚠ umbral diario superado</span>
+    </div>
+    <div class="cost-summary-values" id="cost-summary-values"></div>
+</div>
+
 <div class="metrics-grid">
     <div class="card">
         <h3>Runs per Day</h3>
@@ -34,6 +42,14 @@
     <div class="card">
         <h3>Errors per Day</h3>
         <canvas id="chart-errors"></canvas>
+    </div>
+    <div class="card">
+        <h3>Cost per Day (USD)</h3>
+        <canvas id="chart-cost-day"></canvas>
+    </div>
+    <div class="card">
+        <h3>Cost by Agent (USD)</h3>
+        <canvas id="chart-cost-agent"></canvas>
     </div>
     <div class="card">
         <h3>Usage by Agent</h3>
@@ -93,6 +109,29 @@ function loadCharts(days) {
 
     fetchJson(`/api/metrics/errors?days=${days}`).then(d => {
         lineChart('chart-errors', d.map(r => r.day), d.map(r => r.count), 'Errors', '#ef4444');
+    });
+
+    fetchJson(`/api/metrics/cost-per-day?days=${days}`).then(d => {
+        lineChart('chart-cost-day', d.map(r => r.day), d.map(r => r.cost), 'USD', '#10b981');
+    });
+
+    fetchJson(`/api/metrics/cost-per-agent?days=${days}`).then(d => {
+        barChart('chart-cost-agent', d.map(r => r.agent_name), d.map(r => r.cost), 'USD');
+    });
+
+    fetchJson(`/api/metrics/cost-summary?days=${days}`).then(d => {
+        const card = document.getElementById('cost-summary-card');
+        const values = document.getElementById('cost-summary-values');
+        const alertBadge = document.getElementById('cost-alert-badge');
+        card.style.display = '';
+        values.innerHTML = `
+            <div class="cost-stat"><span class="cost-label">Hoy</span><span class="cost-value">$${d.today_cost.toFixed(4)}</span></div>
+            <div class="cost-stat"><span class="cost-label">Período (${days}d)</span><span class="cost-value">$${d.total_cost.toFixed(4)}</span></div>
+            <div class="cost-stat"><span class="cost-label">Runs</span><span class="cost-value">${d.total_runs}</span></div>
+            ${d.alert_threshold ? `<div class="cost-stat"><span class="cost-label">Umbral diario</span><span class="cost-value">$${parseFloat(d.alert_threshold).toFixed(4)}</span></div>` : ''}
+        `;
+        if (d.alert) alertBadge.style.display = '';
+        else alertBadge.style.display = 'none';
     });
 
     fetchJson(`/api/metrics/usage-by-agent?days=${days}`).then(d => {
@@ -285,6 +324,43 @@ loadCodexQuota();
 .quota-empty {
     color: var(--text-secondary, #6b7280);
     font-size: 0.85rem;
+}
+.cost-summary-card {
+    border: 1px solid var(--border, #e5e7eb);
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin-top: 1rem;
+}
+.cost-summary-header {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    margin-bottom: 1rem;
+}
+.cost-summary-header h3 {
+    margin: 0;
+    font-size: 0.95rem;
+    color: var(--text-secondary, #6b7280);
+}
+.cost-summary-values {
+    display: flex;
+    gap: 2rem;
+    flex-wrap: wrap;
+}
+.cost-stat {
+    display: flex;
+    flex-direction: column;
+    gap: .2rem;
+}
+.cost-label {
+    font-size: 0.8rem;
+    color: var(--text-secondary, #6b7280);
+}
+.cost-value {
+    font-size: 1.4rem;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
 }
 </style>
 {% endblock %}

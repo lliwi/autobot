@@ -116,3 +116,61 @@ def usage_by_tool(days=30):
         .all()
     )
     return [{"tool_name": r.tool_name, "count": r.count} for r in rows]
+
+
+def cost_per_day(days=30):
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = (
+        db.session.query(
+            func.date(Run.started_at).label("day"),
+            func.coalesce(func.sum(Run.estimated_cost), 0).label("cost"),
+        )
+        .filter(Run.started_at >= since, Run.estimated_cost.isnot(None))
+        .group_by(func.date(Run.started_at))
+        .order_by(func.date(Run.started_at))
+        .all()
+    )
+    return [{"day": str(r.day), "cost": round(float(r.cost), 6)} for r in rows]
+
+
+def cost_per_agent(days=30):
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    rows = (
+        db.session.query(
+            Agent.name.label("agent_name"),
+            func.coalesce(func.sum(Run.estimated_cost), 0).label("cost"),
+            func.count(Run.id).label("runs"),
+        )
+        .join(Agent, Run.agent_id == Agent.id)
+        .filter(Run.started_at >= since)
+        .group_by(Agent.name)
+        .order_by(func.coalesce(func.sum(Run.estimated_cost), 0).desc())
+        .all()
+    )
+    return [
+        {"agent_name": r.agent_name, "cost": round(float(r.cost), 6), "runs": r.runs}
+        for r in rows
+    ]
+
+
+def cost_summary(days=30):
+    since = datetime.now(timezone.utc) - timedelta(days=days)
+    row = (
+        db.session.query(
+            func.coalesce(func.sum(Run.estimated_cost), 0).label("total"),
+            func.count(Run.id).label("runs"),
+        )
+        .filter(Run.started_at >= since)
+        .one()
+    )
+    today = datetime.now(timezone.utc).date()
+    today_row = (
+        db.session.query(func.coalesce(func.sum(Run.estimated_cost), 0).label("total"))
+        .filter(func.date(Run.started_at) == today)
+        .one()
+    )
+    return {
+        "total_cost": round(float(row.total), 6),
+        "total_runs": row.runs,
+        "today_cost": round(float(today_row.total), 6),
+    }

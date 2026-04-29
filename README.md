@@ -250,6 +250,7 @@ app/worker/
 | `approval_rules` | Reglas de aprobación automática para patches/packages (por agente, tipo y patrón) |
 | `review_events` | Eventos auditados por el reviewer: qué revisó, qué dijo, tokens consumidos |
 | `codex_quota_snapshots` | Snapshot histórico de cuotas/rate-limits devueltos por la API de Codex |
+| `workspace_file_versions` | Historial de versiones de `SOUL.md` y `AGENTS.md` editados desde el dashboard (contenido previo, quién guardó, cuándo) |
 
 ### Runtime del agente
 
@@ -333,6 +334,8 @@ Cada workspace tiene un venv aislado en `<workspace>/.venv`. El agente solicita 
 - `VENV_BASE_PACKAGES` se instala en cada venv nuevo para tener un kit base.
 
 ### Workspace de agente
+
+`SOUL.md` y `AGENTS.md` son editables directamente desde **Dashboard → Agents → (agente) → panel de detalle**. Cada guardado con cambios crea automáticamente un snapshot de la versión anterior en `workspace_file_versions`. El botón **Historial** junto a cada fichero permite ver el diff coloreado entre versiones y restaurar cualquiera de ellas con un clic (la restauración también genera un snapshot, por lo que es reversible). `MEMORY.md` lo gestiona el agente mediante `propose_change`; `TOOLS.md` se regenera automáticamente al registrar tools.
 
 Cada agente tiene un directorio en `/workspaces/<slug>/`:
 
@@ -656,14 +659,12 @@ qué hizo el scheduler, el Matrix adapter y el runtime del agente.
 - [x] **Portabilidad**: `flask export-bundle` / `flask import-bundle` para clonar una instalación entera
 - [x] **Promoción a plantilla**: tools y skills probadas en producción se promueven a `workspaces/_template/` vía bundle descargable o PR automático en GitHub (`gh_token` desde credenciales cifradas o env); broadcast opcional a todos los agentes existentes
 - [x] **Logs centralizados**: ring buffer Redis compartido web+worker, vista `Observability → Logs` con filtros + auto-refresh
+- [x] **Métricas de coste**: panel en Metrics con coste estimado (USD) por día y por agente, tarjeta resumen con total del período y coste de hoy; alerta visual configurable via `COST_ALERT_EUR_DAILY`
+- [x] **Rate-limit en APIs sensibles**: `flask-limiter` con backend Redis aplicado a `/api/auth/login` (10/min, 30/h) y `/api/chat` (30/min); respuesta 429 JSON en todas las APIs
+- [x] **Historial de ficheros de workspace**: `SOUL.md` y `AGENTS.md` versionados automáticamente en cada guardado desde el dashboard; diff coloreado entre versiones y restauración reversible con un clic (`workspace_file_versions`)
 - [x] **Tests del core (bootstrap)**: suite `tests/` con 67 casos en pytest cubriendo `patch_validator` (JSON/AST/handler/smoke-import), `security_policy` (clasificación L1/L2/L3), `approval_rule_service` (patrones + CRUD) y `patch_service` (propose/approve/apply/reject/rollback, no-op, dedup, rate-limit). Se ejecutan con `docker compose run --rm web pytest`.
 - [ ] **Fase 6 — Hardening** (pendiente):
     - **Ampliar cobertura de tests**: la suite base ya corre en verde. Queda extenderla a `scheduler_service` (cron + heartbeat), `agent_runner` (tool rounds, context budget), `review_service` (effort dial, sampling) y a un flow de integración end-to-end del chat SSE con runtime mockeado.
     - **Sandbox real de ejecución**: workspace tools corren hoy en un venv por agente pero comparten filesystem/red/CPU del contenedor. Aislar con un contenedor efímero (Docker-in-Docker o `firecracker`/`bwrap`), network egress controlado, cuotas de CPU/memoria/filesystem.
     - **Límites finos por agente**: cap diario de tokens / coste € por agente (`agents.daily_token_budget`, `daily_cost_budget_eur`) con freno automático cuando se supera. Hoy sólo existe `review_token_budget_daily` para el reviewer.
-    - **Métricas de coste**: columna `cost_eur` ya se persiste en `runs`; falta panel en Metrics con € por día / por agente / por tool, y alertas cuando sobrepasa umbral.
-    - **Rotación de credenciales**: marca `rotate_after` en `credentials`, aviso en dashboard cuando caduca. Hoy el admin las edita a mano sin recordatorio.
-    - **Rate-limit en APIs sensibles**: `RATELIMIT_STORAGE_URI` está configurado pero ningún endpoint lo usa todavía (login brute-force, chat flood).
-    - **Endpoint `/health`**: requisito de §9.5 — expone estado de DB, Redis, Matrix, scheduler, Codex OAuth.
-    - **Métricas Prometheus**: `/metrics` en formato Prometheus para observabilidad externa.
     - **Auditoría firmada**: hoy los patches quedan en `patch_proposals` pero no hay hash encadenado que permita detectar manipulación retrospectiva del historial.
