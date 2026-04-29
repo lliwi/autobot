@@ -90,6 +90,12 @@ def run(agent, session, user_message, run_id):
       - {"type": "error", "data": "..."}
       - {"type": "done", "data": "...", "usage": {...}}
     """
+    from app.services.agent_budget_service import check_budget
+    budget_err = check_budget(agent)
+    if budget_err:
+        yield json.dumps({"type": "error", "data": budget_err})
+        return
+
     messages = build_context(agent, session, user_message)
     # Mark the boundary between the initial context (system + history + user)
     # and the agentic pairs appended during the loop. _trim_inloop_messages uses

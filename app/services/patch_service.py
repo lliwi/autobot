@@ -175,6 +175,8 @@ def propose_change(agent_id, target_path, new_content, title, reason, run_id=Non
     else:
         status = "pending_review"
 
+    from datetime import datetime, timezone as _tz
+    now = datetime.now(_tz.utc)
     patch = PatchProposal(
         agent_id=agent_id,
         run_id=run_id,
@@ -187,8 +189,14 @@ def propose_change(agent_id, target_path, new_content, title, reason, run_id=Non
         status=status,
         snapshot_path=snapshot_path,
         test_result_json={"validation": validation},
+        created_at=now,
     )
     db.session.add(patch)
+    db.session.flush()  # assign patch.id without committing
+
+    from app.services.patch_audit_service import stamp
+    stamp(patch)
+
     db.session.commit()
 
     # Auto-apply level 1 changes.

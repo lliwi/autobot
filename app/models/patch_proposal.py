@@ -22,6 +22,10 @@ class PatchProposal(db.Model):
     test_result_json = db.Column(db.JSON, nullable=True)
     created_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     applied_at = db.Column(db.DateTime, nullable=True)
+    # Audit chain: SHA-256 of (agent_id, target_path, diff_text, created_at, previous_hash).
+    # previous_hash links to the prior patch in the chain; "genesis" for the first.
+    content_hash = db.Column(db.String(64), nullable=True, index=True)
+    previous_hash = db.Column(db.String(64), nullable=True)
 
     # Relationships
     agent = db.relationship("Agent", backref="patch_proposals")
@@ -43,4 +47,6 @@ class PatchProposal(db.Model):
             "test_result_json": self.test_result_json,
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "applied_at": self.applied_at.isoformat() if self.applied_at else None,
+            "content_hash": self.content_hash,
+            "previous_hash": self.previous_hash,
         }

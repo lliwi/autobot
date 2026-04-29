@@ -67,6 +67,19 @@ def update_agent(agent, data):
             if budget < 0:
                 raise ValueError("review_token_budget_daily must be >= 0")
             agent.review_token_budget_daily = budget or None
+    for key, attr in (("daily_token_budget", "daily_token_budget"), ("daily_cost_budget", "daily_cost_budget")):
+        if key in data:
+            raw = data[key]
+            if raw in (None, "", "none", "null"):
+                setattr(agent, attr, None)
+            else:
+                try:
+                    val = float(raw)
+                except (TypeError, ValueError):
+                    raise ValueError(f"{key} must be a number or empty")
+                if val < 0:
+                    raise ValueError(f"{key} must be >= 0")
+                setattr(agent, attr, int(val) if key == "daily_token_budget" else (val or None))
     if "forward_matrix_room" in data:
         agent.forward_matrix_room = (data["forward_matrix_room"] or "").strip() or None
     if "sync_matrix_room" in data:

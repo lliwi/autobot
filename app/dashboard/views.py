@@ -297,6 +297,8 @@ def agent_edit(agent_id):
                 "parent_agent_id": request.form.get("parent_agent_id", ""),
                 "review_effort": request.form.get("review_effort", ""),
                 "review_token_budget_daily": request.form.get("review_token_budget_daily", ""),
+                "daily_token_budget": request.form.get("daily_token_budget", ""),
+                "daily_cost_budget": request.form.get("daily_cost_budget", ""),
                 "forward_matrix_room": request.form.get("forward_matrix_room", ""),
                 "sync_matrix_room": request.form.get("sync_matrix_room", ""),
                 "matrix_default": request.form.get("matrix_default") == "1",

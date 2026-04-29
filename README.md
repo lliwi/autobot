@@ -234,7 +234,7 @@ app/worker/
 | Tabla | Descripción |
 |---|---|
 | `users` | Administradores del dashboard (con MFA TOTP opcional) |
-| `agents` | Agentes con slug, workspace, modelo, parent_agent_id, review_effort y review_token_budget_daily |
+| `agents` | Agentes con slug, workspace, modelo, parent_agent_id, review_effort, review_token_budget_daily, daily_token_budget y daily_cost_budget |
 | `sessions` | Sesiones de chat por canal (web, matrix) |
 | `messages` | Historial de mensajes por sesión |
 | `runs` | Ejecuciones del agente con métricas (tokens, coste, duración, trigger_type) |
@@ -242,7 +242,7 @@ app/worker/
 | `scheduled_tasks` | Tareas programadas (cron, heartbeat, one-shot) |
 | `skills` | Skills registradas por agente (manifest, estado, fuente) |
 | `tools` | Tools de workspace por agente (manifest, path, timeout) |
-| `patch_proposals` | Propuestas de automejora con diff, snapshot, nivel de seguridad y estado |
+| `patch_proposals` | Propuestas de automejora con diff, snapshot, nivel de seguridad, estado y cadena de auditoría (`content_hash`, `previous_hash`) |
 | `objectives` | Objetivos de trabajo del agente (goal-oriented, multi-run) |
 | `heartbeat_events` | Registro de cada tick del supervisor (decisión, razón, snapshot) |
 | `credentials` | Secretos cifrados con Fernet (API keys, user/password) — globales o por agente |
@@ -395,6 +395,17 @@ puntos de auditoría se activan por `review_effort` (0 = off, 10 = auditoría to
 feedback del reviewer. `review_token_budget_daily` limita el gasto diario en auditorías por agente
 (cuando se supera, el review_gate se cierra hasta el siguiente día UTC). Todo queda auditado en
 `review_events`.
+
+### Límites diarios por agente
+
+Cada agente puede tener dos caps independientes configurables desde **Dashboard → Edit Agent**:
+
+| Campo | Tipo | Efecto |
+|---|---|---|
+| `daily_token_budget` | Integer (tokens) | Bloquea nuevos runs cuando la suma de `input_tokens + output_tokens` del día UTC supera el cap |
+| `daily_cost_budget` | Float (USD) | Bloquea nuevos runs cuando el `estimated_cost` acumulado del día UTC supera el cap |
+
+El check se realiza al inicio de cada run (`agent_runner.run()`). Si se supera cualquiera de los caps, el run se aborta inmediatamente con un mensaje explicativo y no se factura ningún token adicional. Los límites se resetean automáticamente a medianoche UTC. Dejar en blanco equivale a sin límite.
 
 ## Promover tools/skills a la instalación base
 
@@ -635,6 +646,24 @@ consumen cupo, para no penalizar un primer intento sintácticamente roto.
    marcado de `applied_at`.
 5. `rollback` restaura desde el snapshot guardado en `workspaces/<slug>/patches/`.
 
+### Auditoría firmada de patches
+
+Cada `PatchProposal` que supera la validación estática recibe dos campos:
+
+- **`content_hash`** — SHA-256 de `(agent_id, target_path, diff_text, created_at, previous_hash)`.
+- **`previous_hash`** — `content_hash` del patch anterior del mismo agente (o `"genesis"` si es el primero).
+
+Esto forma una cadena enlazada: alterar cualquier campo de un registro invalida su hash y rompe el enlace con todos los patches posteriores. La verificación se hace con:
+
+```python
+from app.services.patch_audit_service import verify_chain
+result = verify_chain(agent_id=1)
+# {"ok": True, "total": 42, "broken_at": None, "first_break": None}
+# {"ok": False, "total": 42, "broken_at": 17, "first_break": "patch #17: stored hash 3f2a1b… does not match expected 9c4e7d…"}
+```
+
+Los patches rechazados por el validador (antes de tocar disco) no entran en la cadena.
+
 ## Observabilidad
 
 ### Logs (ring buffer)
@@ -659,6 +688,8 @@ qué hizo el scheduler, el Matrix adapter y el runtime del agente.
 - [x] **Portabilidad**: `flask export-bundle` / `flask import-bundle` para clonar una instalación entera
 - [x] **Promoción a plantilla**: tools y skills probadas en producción se promueven a `workspaces/_template/` vía bundle descargable o PR automático en GitHub (`gh_token` desde credenciales cifradas o env); broadcast opcional a todos los agentes existentes
 - [x] **Logs centralizados**: ring buffer Redis compartido web+worker, vista `Observability → Logs` con filtros + auto-refresh
+- [x] **Límites diarios por agente**: `daily_token_budget` (tokens) y `daily_cost_budget` (USD) configurables por agente desde el dashboard; freno automático al inicio de cada run cuando se supera el cap del día UTC (`agent_budget_service`)
+- [x] **Auditoría firmada de patches**: cadena SHA-256 en `patch_proposals` — cada patch almacena `content_hash` y `previous_hash` enlazando con el anterior; `patch_audit_service.verify_chain()` detecta cualquier manipulación retrospectiva
 - [x] **Métricas de coste**: panel en Metrics con coste estimado (USD) por día y por agente, tarjeta resumen con total del período y coste de hoy; alerta visual configurable via `COST_ALERT_EUR_DAILY`
 - [x] **Rate-limit en APIs sensibles**: `flask-limiter` con backend Redis aplicado a `/api/auth/login` (10/min, 30/h) y `/api/chat` (30/min); respuesta 429 JSON en todas las APIs
 - [x] **Historial de ficheros de workspace**: `SOUL.md` y `AGENTS.md` versionados automáticamente en cada guardado desde el dashboard; diff coloreado entre versiones y restauración reversible con un clic (`workspace_file_versions`)
@@ -666,5 +697,5 @@ qué hizo el scheduler, el Matrix adapter y el runtime del agente.
 - [ ] **Fase 6 — Hardening** (pendiente):
     - **Ampliar cobertura de tests**: la suite base ya corre en verde. Queda extenderla a `scheduler_service` (cron + heartbeat), `agent_runner` (tool rounds, context budget), `review_service` (effort dial, sampling) y a un flow de integración end-to-end del chat SSE con runtime mockeado.
     - **Sandbox real de ejecución**: workspace tools corren hoy en un venv por agente pero comparten filesystem/red/CPU del contenedor. Aislar con un contenedor efímero (Docker-in-Docker o `firecracker`/`bwrap`), network egress controlado, cuotas de CPU/memoria/filesystem.
-    - **Límites finos por agente**: cap diario de tokens / coste € por agente (`agents.daily_token_budget`, `daily_cost_budget_eur`) con freno automático cuando se supera. Hoy sólo existe `review_token_budget_daily` para el reviewer.
-    - **Auditoría firmada**: hoy los patches quedan en `patch_proposals` pero no hay hash encadenado que permita detectar manipulación retrospectiva del historial.
+    - ~~**Límites finos por agente**~~
+    - ~~**Auditoría firmada**~~

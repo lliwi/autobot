@@ -22,6 +22,11 @@ class Agent(db.Model):
     # Enforced in review_service.should_review — when today's consumption
     # reaches the cap the gate closes for the rest of the UTC day.
     review_token_budget_daily = db.Column(db.Integer, nullable=True)
+    # Per-agent daily caps on inference usage. Checked at the start of every
+    # run; when exceeded the run is blocked for the rest of the UTC day.
+    # None = unlimited.
+    daily_token_budget = db.Column(db.Integer, nullable=True)
+    daily_cost_budget = db.Column(db.Float, nullable=True)
     # Hard cap on tool-call rounds in a single run. Prevents runaway loops.
     # None falls back to agent_runner.DEFAULT_MAX_TOOL_ROUNDS.
     max_tool_rounds = db.Column(db.Integer, nullable=True)
@@ -61,6 +66,8 @@ class Agent(db.Model):
             "group_response_policy": self.group_response_policy,
             "review_effort": self.review_effort,
             "review_token_budget_daily": self.review_token_budget_daily,
+            "daily_token_budget": self.daily_token_budget,
+            "daily_cost_budget": self.daily_cost_budget,
             "max_tool_rounds": self.max_tool_rounds,
             "forward_matrix_room": self.forward_matrix_room,
             "sync_matrix_room": self.sync_matrix_room,
