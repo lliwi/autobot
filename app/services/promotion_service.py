@@ -548,10 +548,15 @@ def _git(*args, cwd=None):
     return result.stdout.strip()
 
 
+_DEFAULT_REPO = "https://github.com/lliwi/autobot"
+
+
 def _gh_pr_create(branch: str, title: str, body: str, cwd=None, gh_token: str = "") -> str:
+    repo = os.environ.get("AUTOBOT_GITHUB_REPO", "").strip() or _DEFAULT_REPO
+    cmd = ["gh", "pr", "create", "--title", title, "--body", body, "--head", branch, "--repo", repo]
     try:
         result = subprocess.run(
-            ["gh", "pr", "create", "--title", title, "--body", body, "--head", branch],
+            cmd,
             cwd=cwd,
             capture_output=True,
             text=True,
@@ -569,9 +574,11 @@ def _gh_pr_create(branch: str, title: str, body: str, cwd=None, gh_token: str = 
 
 
 def _git_branch_exists(branch: str) -> bool:
+    root = _repo_root()
     try:
         result = subprocess.run(
             ["git", "branch", "--list", branch],
+            cwd=root,
             capture_output=True, text=True, check=True,
         )
         return bool(result.stdout.strip())
@@ -580,9 +587,13 @@ def _git_branch_exists(branch: str) -> bool:
 
 
 def _repo_root() -> Path | None:
+    # Anchor to this file so the subprocess finds the git root even when
+    # the process cwd differs (e.g. inside Docker with cwd=/app).
+    here = Path(__file__).resolve().parent
     try:
         out = subprocess.run(
             ["git", "rev-parse", "--show-toplevel"],
+            cwd=here,
             capture_output=True, text=True, check=True,
         )
         return Path(out.stdout.strip())

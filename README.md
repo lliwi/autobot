@@ -56,6 +56,7 @@ Todas las variables se definen en `.env`. Ver `.env.example` para referencia.
 | `AVATAR_MAX_BYTES` | Tamaño máximo por avatar (default: `2 MB`) | No |
 | `MFA_ISSUER` | Issuer mostrado en apps TOTP (default: `Autobot`) | No |
 | `AUTOBOT_CRED_<NAME>` | Credencial preseeded desde entorno — visible a los agentes por `get_credential` con `source=env` | No |
+| `AUTOBOT_GITHUB_REPO` | Repo de GitHub destino de los PRs de promoción (default: `https://github.com/lliwi/autobot`). Útil si trabajas en un fork | No |
 | `MATRIX_HOMESERVER` | URL del servidor Matrix (e.g. `https://matrix.org`) | Para Matrix |
 | `MATRIX_USER_ID` | User ID del bot Matrix (e.g. `@bot:matrix.org`) | Para Matrix |
 | `MATRIX_PASSWORD` | Contraseña del bot Matrix | Para Matrix |
@@ -440,6 +441,12 @@ Si hay un token de GitHub configurado, la app crea la rama, hace el commit y abr
 | Variable de entorno | `GH_TOKEN=ghp_xxx` en `.env` (o `AUTOBOT_CRED_GH_TOKEN=ghp_xxx`) |
 
 El sistema busca en este orden: credencial `gh_token` en BD → `AUTOBOT_CRED_GH_TOKEN` en env → `GH_TOKEN` en env.
+
+El repo destino del PR se toma de `AUTOBOT_GITHUB_REPO` en `.env` (default: `https://github.com/lliwi/autobot`). Si trabajas en un fork, añade:
+
+```env
+AUTOBOT_GITHUB_REPO=https://github.com/tu-usuario/autobot
+```
 
 Desde el dashboard (admin): **Agents → Tools/Skills del agente → `🔀 PR`**
 
