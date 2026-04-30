@@ -63,7 +63,7 @@ def get_promotion_status(item_type: str, slug: str) -> dict:
 # Level 1 — bundle generation (no external deps)
 # ---------------------------------------------------------------------------
 
-def generate_promotion_bundle(agent_id: int, item_type: str, slug: str) -> dict:
+def generate_promotion_bundle(agent_id: int | None, item_type: str, slug: str) -> dict:
     """Build a downloadable tar.gz with item files, requirements.txt, diff and PROMOTION.md.
 
     Returns {"ok": bool, "bundle_path": str, "diff": str, "pr_title": str, "pr_body": str,
@@ -124,7 +124,7 @@ def generate_promotion_bundle(agent_id: int, item_type: str, slug: str) -> dict:
 # Level 2 — automatic GitHub PR (requires GH_TOKEN)
 # ---------------------------------------------------------------------------
 
-def create_promotion_pr(agent_id: int, item_type: str, slug: str) -> dict:
+def create_promotion_pr(agent_id: int | None, item_type: str, slug: str) -> dict:
     """Create a git branch, commit and GitHub PR for the promotion.
 
     Returns {"ok": bool, "pr_url": str|None, "branch": str|None, "error": str|None}.
@@ -199,21 +199,22 @@ def create_promotion_pr(agent_id: int, item_type: str, slug: str) -> dict:
 # Level 3 — broadcast to all existing agents
 # ---------------------------------------------------------------------------
 
-def broadcast_to_all_agents(agent_id: int, item_type: str, slug: str) -> dict:
-    """Copy the item to all existing agents that don't already have it."""
+def broadcast_to_all_agents(agent_id: int | None, item_type: str, slug: str) -> dict:
+    """Assign the item to all existing agents that don't already have it."""
     item = _get_item(item_type, agent_id, slug)
     if item is None:
         return {"ok": False, "error": f"{item_type} '{slug}' not found", "broadcast_copied": 0, "broadcast_errors": []}
 
-    all_agents = Agent.query.filter(Agent.id != agent_id).all()
+    exclude_id = agent_id or 0
+    all_agents = Agent.query.filter(Agent.id != exclude_id).all()
     copied = 0
     errors = []
 
     for target_agent in all_agents:
         try:
             if item_type == "skill":
-                from app.services.skill_service import share_skill
-                share_skill(item.id, target_agent.id)
+                from app.services.skill_service import assign_skill_to_agent
+                assign_skill_to_agent(item.id, target_agent.id)
             else:
                 from app.services.tool_service import copy_tool
                 copy_tool(item.id, target_agent.id)
@@ -228,32 +229,39 @@ def broadcast_to_all_agents(agent_id: int, item_type: str, slug: str) -> dict:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
-def _resolve_and_validate(agent_id: int, item_type: str, slug: str) -> dict:
-    """Fetch agent + item, check enabled, validate files and scan for secrets.
+def _resolve_and_validate(agent_id: int | None, item_type: str, slug: str) -> dict:
+    """Fetch item, validate files and scan for secrets.
 
-    Returns enriched dict. Also includes "scan" key with the secrets-scan result.
-    Fails ("ok": False) if any HIGH severity secrets are found.
+    For skills (global), agent_id is ignored — the source is always _global/skills/.
+    For tools, agent_id is required to locate the agent's workspace.
+
+    Returns enriched dict. Fails ("ok": False) if HIGH secrets are found.
     """
     if item_type not in _ITEM_DIRS:
         return {"ok": False, "error": f"Unknown item_type '{item_type}'"}
 
-    agent = db.session.get(Agent, agent_id)
-    if agent is None:
-        return {"ok": False, "error": "Agent not found"}
-
     item = _get_item(item_type, agent_id, slug)
     if item is None:
-        return {"ok": False, "error": f"{item_type.capitalize()} '{slug}' not found for this agent"}
+        return {"ok": False, "error": f"{item_type.capitalize()} '{slug}' not found"}
 
-    if not item.enabled:
-        return {"ok": False, "error": f"{item_type.capitalize()} '{slug}' is disabled — enable it before promoting"}
+    if item_type == "skill":
+        from app.workspace.manager import get_global_skills_path
+        source_dir = get_global_skills_path() / slug
+        workspace_root = source_dir.parent.parent  # _global/
+        agent = None
+    else:
+        agent = db.session.get(Agent, agent_id)
+        if agent is None:
+            return {"ok": False, "error": "Agent not found"}
+        if not item.enabled:
+            return {"ok": False, "error": f"Tool '{slug}' is disabled — enable it before promoting"}
+        workspace_root = get_workspace_path(agent)
+        source_dir = workspace_root / _ITEM_DIRS[item_type] / slug
 
-    workspace = get_workspace_path(agent)
-    source_dir = workspace / _ITEM_DIRS[item_type] / slug
     if not source_dir.exists():
         return {"ok": False, "error": f"Source directory not found: {source_dir}"}
 
-    validation_error = _validate_directory(source_dir, workspace)
+    validation_error = _validate_directory(source_dir, workspace_root)
     if validation_error:
         return {"ok": False, "error": f"Validation failed: {validation_error}"}
 
@@ -271,10 +279,11 @@ def _resolve_and_validate(agent_id: int, item_type: str, slug: str) -> dict:
             "scan": scan, "error": None}
 
 
-def _get_item(item_type: str, agent_id: int, slug: str):
+def _get_item(item_type: str, agent_id: int | None, slug: str):
     if item_type == "tool":
         return Tool.query.filter_by(agent_id=agent_id, slug=slug).first()
-    return Skill.query.filter_by(agent_id=agent_id, slug=slug).first()
+    # Skills are global — agent_id is irrelevant
+    return Skill.query.filter_by(slug=slug).first()
 
 
 def _validate_directory(source_dir: Path, workspace_root: Path) -> str | None:
@@ -345,6 +354,7 @@ def _collect_requirements(agent, source_dir: Path) -> list[str]:
       1. ``requirements`` list declared in manifest.json (explicit).
       2. Infer from Python import statements vs packages installed in the agent's
          workspace (PackageInstallation where status='installed').
+         When agent is None (global skill), only the manifest is used.
     Merges both sources, deduplicates, returns sorted list of specs.
     """
     from app.models.package_installation import PackageInstallation
@@ -360,13 +370,16 @@ def _collect_requirements(agent, source_dir: Path) -> list[str]:
         except Exception:
             pass
 
-    # 2. Installed packages for this agent
-    installed = PackageInstallation.query.filter_by(
-        agent_id=agent.id, status="installed"
-    ).all()
-    installed_by_name = {
-        _norm(row.name): row.spec for row in installed
-    }
+    # 2. Installed packages for this agent (skip when agent is None for global skills)
+    if agent is None:
+        installed_by_name: dict[str, str] = {}
+    else:
+        installed = PackageInstallation.query.filter_by(
+            agent_id=agent.id, status="installed"
+        ).all()
+        installed_by_name = {
+            _norm(row.name): row.spec for row in installed
+        }
 
     # 3. Extract imported module names from all .py files
     imported_modules: set[str] = set()
@@ -472,8 +485,13 @@ def _branch_name(item_type: str, slug: str) -> str:
 
 def _pr_texts(agent, item_type: str, item, diff: str,
               requirements: list[str], scan: dict) -> tuple[str, str]:
-    count, last_applied = _patch_count(agent.id, item_type, item.slug)
-    last_str = last_applied.strftime("%Y-%m-%d") if last_applied else "N/A"
+    if agent is not None:
+        count, last_applied = _patch_count(agent.id, item_type, item.slug)
+        last_str = last_applied.strftime("%Y-%m-%d") if last_applied else "N/A"
+        origin_line = f"**Origen:** agente `{agent.slug}` (`{agent.name}`)"
+    else:
+        count, last_str = 0, "N/A"
+        origin_line = "**Origen:** catálogo global"
     has_diff = bool(diff.strip())
 
     pr_title = f"promote({item_type}): {item.slug} v{item.version}"
@@ -497,7 +515,7 @@ def _pr_texts(agent, item_type: str, item, diff: str,
     pr_body = f"""\
 ## Promoción: {item_type}/{item.slug} v{item.version}
 
-**Origen:** agente `{agent.slug}` (`{agent.name}`)
+{origin_line}
 **Patches aplicados:** {count} (último: {last_str})
 **Validación de código:** OK
 

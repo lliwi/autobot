@@ -3,6 +3,7 @@ from flask import jsonify, request
 from app.api import api_bp
 from app.api.middleware import auth_required
 from app.services.skill_service import (
+    assign_skill_to_agent,
     create_skill,
     get_skill,
     list_skills,
@@ -24,10 +25,13 @@ def list_skills_api():
 @auth_required
 def create_skill_api():
     data = request.get_json()
-    if not data or "agent_id" not in data or "name" not in data:
-        return jsonify(error="agent_id and name required"), 400
+    if not data or "name" not in data:
+        return jsonify(error="name required"), 400
+    agent_id = data.get("agent_id")
+    if not agent_id:
+        return jsonify(error="agent_id required"), 400
     try:
-        skill = create_skill(data["agent_id"], data)
+        skill = create_skill(agent_id, data)
         return jsonify(skill.to_dict()), 201
     except ValueError as e:
         return jsonify(error=str(e)), 400
@@ -46,7 +50,7 @@ def update_skill_api(skill_id):
 
     from app.extensions import db
 
-    for field in ("name", "description", "enabled", "version"):
+    for field in ("name", "description", "version"):
         if field in data:
             setattr(skill, field, data[field])
     db.session.commit()
@@ -65,10 +69,14 @@ def reload_skill_api(skill_id):
 @api_bp.route("/skills/<int:skill_id>/toggle", methods=["POST"])
 @auth_required
 def toggle_skill_api(skill_id):
-    skill = toggle_skill(skill_id)
-    if skill is None:
-        return jsonify(error="Skill not found"), 404
-    return jsonify(skill.to_dict())
+    data = request.get_json() or {}
+    agent_id = data.get("agent_id") or request.args.get("agent_id", type=int)
+    if not agent_id:
+        return jsonify(error="agent_id required"), 400
+    result = toggle_skill(skill_id, agent_id)
+    if result is None:
+        return jsonify(error="Assignment not found"), 404
+    return jsonify({"skill_id": skill_id, "agent_id": agent_id, "enabled": result.enabled})
 
 
 @api_bp.route("/skills/sync", methods=["POST"])
@@ -79,3 +87,17 @@ def sync_skills_api():
         return jsonify(error="agent_id required"), 400
     skills = sync_agent_skills(agent_id)
     return jsonify([s.to_dict() for s in skills])
+
+
+@api_bp.route("/skills/<int:skill_id>/assign", methods=["POST"])
+@auth_required
+def assign_skill_api(skill_id):
+    data = request.get_json() or {}
+    target_agent_id = data.get("agent_id") or data.get("target_agent_id")
+    if not target_agent_id:
+        return jsonify(error="agent_id required"), 400
+    try:
+        ags = assign_skill_to_agent(skill_id, target_agent_id)
+        return jsonify({"skill_id": skill_id, "agent_id": ags.agent_id, "enabled": ags.enabled}), 201
+    except ValueError as e:
+        return jsonify(error=str(e)), 400

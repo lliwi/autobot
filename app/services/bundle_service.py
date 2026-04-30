@@ -115,8 +115,14 @@ def export_bundle(
     tools_payload = [_serialize_tool(t) for t in tools if t.agent]
     report.tools = len(tools_payload)
 
-    skills = Skill.query.order_by(Skill.id.asc()).all()
-    skills_payload = [_serialize_skill(s) for s in skills if s.agent]
+    from app.models.skill import AgentSkill
+    agent_skills = (
+        AgentSkill.query
+        .join(Skill, AgentSkill.skill_id == Skill.id)
+        .order_by(Skill.id.asc(), AgentSkill.agent_id.asc())
+        .all()
+    )
+    skills_payload = [_serialize_skill_assignment(ags) for ags in agent_skills if ags.agent]
     report.skills = len(skills_payload)
 
     packages = PackageInstallation.query.order_by(PackageInstallation.id.asc()).all()
@@ -206,15 +212,17 @@ def _serialize_tool(t: Tool) -> dict:
     }
 
 
-def _serialize_skill(s: Skill) -> dict:
+def _serialize_skill_assignment(ags) -> dict:
+    """Serialize a skill + its per-agent assignment for the bundle."""
+    s = ags.skill
     return {
-        "agent_slug": s.agent.slug,
+        "agent_slug": ags.agent.slug,
         "slug": s.slug,
         "name": s.name,
         "version": s.version,
         "description": s.description,
         "source": s.source,
-        "enabled": s.enabled,
+        "enabled": ags.enabled,
         "manifest_json": s.manifest_json,
         "path": s.path,
     }
@@ -496,40 +504,56 @@ def _import_skills(
     overwrite: bool,
     report: ImportReport,
 ) -> None:
+    from datetime import datetime, timezone
+    from app.models.skill import AgentSkill
+
     for entry in payload:
-        agent = slug_to_agent.get(entry.get("agent_slug"))
-        if not agent:
-            report.warnings.append(
-                f"skills.json: skipped '{entry.get('slug')}' — agent '{entry.get('agent_slug')}' missing"
-            )
-            continue
+        slug = entry.get("slug")
+        agent_slug = entry.get("agent_slug")
+        agent = slug_to_agent.get(agent_slug) if agent_slug else None
 
-        existing = Skill.query.filter_by(agent_id=agent.id, slug=entry.get("slug")).first()
-        if existing and not overwrite:
-            continue
-
-        if existing:
-            existing.name = entry.get("name") or existing.name
-            existing.version = entry.get("version") or existing.version
-            existing.description = entry.get("description")
-            existing.source = entry.get("source") or existing.source
-            existing.enabled = bool(entry.get("enabled", existing.enabled))
-            existing.manifest_json = entry.get("manifest_json")
-            existing.path = entry.get("path") or existing.path
-            report.skills_updated += 1
-        else:
-            db.session.add(Skill(
-                agent_id=agent.id,
-                name=entry.get("name") or entry.get("slug"),
-                slug=entry.get("slug"),
+        # Upsert the global Skill row (one per slug, no agent ownership)
+        skill = Skill.query.filter_by(slug=slug).first()
+        if skill is None:
+            skill = Skill(
+                name=entry.get("name") or slug,
+                slug=slug,
                 version=entry.get("version") or "0.1.0",
                 description=entry.get("description"),
                 source=entry.get("source") or "manual",
-                enabled=bool(entry.get("enabled", True)),
                 manifest_json=entry.get("manifest_json"),
-                path=entry.get("path") or f"skills/{entry.get('slug')}",
-            ))
+                path=entry.get("path") or f"skills/{slug}",
+            )
+            db.session.add(skill)
+            db.session.flush()
             report.skills_created += 1
+        elif overwrite:
+            skill.name = entry.get("name") or skill.name
+            skill.version = entry.get("version") or skill.version
+            skill.description = entry.get("description")
+            skill.source = entry.get("source") or skill.source
+            skill.manifest_json = entry.get("manifest_json")
+            skill.path = entry.get("path") or skill.path
+            report.skills_updated += 1
+
+        # Create AgentSkill assignment if agent is known
+        if agent is None:
+            if agent_slug:
+                report.warnings.append(
+                    f"skills.json: agent '{agent_slug}' missing — skill '{slug}' imported globally without assignment"
+                )
+            continue
+
+        ags = AgentSkill.query.filter_by(agent_id=agent.id, skill_id=skill.id).first()
+        if ags is None:
+            db.session.add(AgentSkill(
+                agent_id=agent.id,
+                skill_id=skill.id,
+                enabled=bool(entry.get("enabled", True)),
+                created_at=datetime.now(timezone.utc),
+            ))
+        elif overwrite:
+            ags.enabled = bool(entry.get("enabled", ags.enabled))
 
 
 def _import_packages(

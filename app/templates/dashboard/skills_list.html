@@ -29,12 +29,14 @@
     </thead>
     <tbody>
         {% for skill in skills %}
+        {% set ags = agent_skills_map.get(skill.id) %}
+        {% set is_enabled = ags and ags.enabled %}
         <tr>
             <td><strong>{{ skill.name }}</strong><br><small><code>{{ skill.path }}</code></small></td>
             <td>{{ skill.version }}</td>
             <td>{{ skill.source }}</td>
             <td>{{ skill.description or '-' }}</td>
-            <td><span class="badge badge-{{ 'active' if skill.enabled else 'inactive' }}">{{ 'Enabled' if skill.enabled else 'Disabled' }}</span></td>
+            <td><span class="badge badge-{{ 'active' if is_enabled else 'inactive' }}">{{ 'Enabled' if is_enabled else 'Disabled' }}</span></td>
             <td>
                 {% if skill.slug in promoted_slugs %}
                     <span class="badge badge-active" title="Ya incluida en _template/">&#9733; En template</span>
@@ -45,10 +47,12 @@
             <td>
                 <form method="POST" action="{{ url_for('dashboard.skill_toggle', skill_id=skill.id) }}" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="btn btn-sm">{{ 'Disable' if skill.enabled else 'Enable' }}</button>
+                    <input type="hidden" name="agent_id" value="{{ agent.id }}">
+                    <button type="submit" class="btn btn-sm">{{ 'Disable' if is_enabled else 'Enable' }}</button>
                 </form>
                 <form method="POST" action="{{ url_for('dashboard.skill_reload', skill_id=skill.id) }}" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="agent_id" value="{{ agent.id }}">
                     <button type="submit" class="btn btn-sm">Reload</button>
                 </form>
                 {% if is_admin %}
@@ -67,6 +71,6 @@
     </tbody>
 </table>
 {% else %}
-<p class="empty-state">No skills found. Click "Sync from Workspace" to discover skills, or add them to <code>{{ agent.workspace_path }}/skills/</code>.</p>
+<p class="empty-state">No skills assigned to this agent. Go to the <a href="{{ url_for('dashboard.skills_overview') }}">global catalog</a> to assign skills, or click "Sync from Workspace" to discover skills in <code>workspaces/_global/skills/</code>.</p>
 {% endif %}
 {% endblock %}

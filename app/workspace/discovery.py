@@ -9,10 +9,10 @@ import logging
 from pathlib import Path
 
 from app.extensions import db
-from app.models.skill import Skill
+from app.models.skill import AgentSkill, Skill
 from app.models.tool import Tool
 from app.runtime.tool_registry import get_all_definitions as get_builtin_definitions
-from app.workspace.manager import get_workspace_path
+from app.workspace.manager import get_global_skills_path, get_workspace_path
 from app.workspace.manifest import load_manifest, validate_skill_manifest, validate_tool_manifest
 
 logger = logging.getLogger(__name__)
@@ -61,10 +61,9 @@ def discover_workspace_tools(agent):
     return results
 
 
-def discover_workspace_skills(agent):
-    """Scan skills/ directory and return list of valid skill dicts."""
-    workspace = get_workspace_path(agent)
-    skills_dir = workspace / "skills"
+def discover_global_skills():
+    """Scan _global/skills/ and return list of valid skill dicts."""
+    skills_dir = get_global_skills_path()
     if not skills_dir.exists():
         return []
 
@@ -113,7 +112,6 @@ def sync_tools_to_db(agent):
     results = []
     for td in discovered:
         tool = existing_map.get(td["slug"])
-        is_new = tool is None
         if tool:
             tool.name = td["name"]
             tool.description = td["description"]
@@ -150,17 +148,22 @@ def sync_tools_to_db(agent):
     return results
 
 
-def sync_skills_to_db(agent):
-    """Discover workspace skills and upsert Skill rows. Returns list of Skill instances."""
-    discovered = discover_workspace_skills(agent)
+def sync_global_skills_to_db(agent=None):
+    """Discover global skills and upsert Skill rows.
+
+    When ``agent`` is provided, also creates AgentSkill rows for any newly
+    discovered skills so the agent has access to them.
+
+    Returns list of Skill instances.
+    """
+    discovered = discover_global_skills()
     discovered_slugs = {s["slug"] for s in discovered}
 
-    existing = Skill.query.filter_by(agent_id=agent.id).all()
-    existing_map = {s.slug: s for s in existing}
+    existing = {s.slug: s for s in Skill.query.all()}
 
     results = []
     for sd in discovered:
-        skill = existing_map.get(sd["slug"])
+        skill = existing.get(sd["slug"])
         if skill:
             skill.name = sd["name"]
             skill.description = sd["description"]
@@ -169,30 +172,59 @@ def sync_skills_to_db(agent):
             skill.path = sd["path"]
         else:
             skill = Skill(
-                agent_id=agent.id,
                 name=sd["name"],
                 slug=sd["slug"],
                 description=sd["description"],
                 version=sd["version"],
                 source="workspace",
-                enabled=True,
                 manifest_json=sd["manifest"],
                 path=sd["path"],
             )
             db.session.add(skill)
+        db.session.flush()
         results.append(skill)
 
-        # Register packages from requirements.txt
-        skill_dir = get_workspace_path(agent) / sd["path"]
-        _register_requirements(agent, skill_dir)
+        if agent is not None:
+            _ensure_agent_skill(agent, skill)
 
-    # Disable skills whose directory was removed
-    for slug, skill in existing_map.items():
-        if slug not in discovered_slugs:
-            skill.enabled = False
+        # Register packages from requirements.txt
+        skill_dir = get_global_skills_path() / sd["slug"]
+        if agent is not None:
+            _register_requirements(agent, skill_dir)
+
+    # Disable skills whose directory was removed (soft: remove AgentSkill rows that
+    # point to non-existing slugs — the Skill row itself stays for audit).
+    if agent is not None:
+        for slug in list(existing.keys()):
+            if slug not in discovered_slugs:
+                removed = existing[slug]
+                ags = AgentSkill.query.filter_by(
+                    agent_id=agent.id, skill_id=removed.id
+                ).first()
+                if ags:
+                    ags.enabled = False
 
     db.session.commit()
     return results
+
+
+# Keep old name as alias for callers that still use it
+sync_skills_to_db = sync_global_skills_to_db
+
+
+def _ensure_agent_skill(agent, skill):
+    """Create an AgentSkill row if one doesn't already exist for (agent, skill)."""
+    from datetime import datetime, timezone
+    existing = AgentSkill.query.filter_by(
+        agent_id=agent.id, skill_id=skill.id
+    ).first()
+    if existing is None:
+        db.session.add(AgentSkill(
+            agent_id=agent.id,
+            skill_id=skill.id,
+            enabled=True,
+            created_at=datetime.now(timezone.utc),
+        ))
 
 
 def _register_requirements(agent, item_dir: Path) -> None:
@@ -209,8 +241,7 @@ def _register_requirements(agent, item_dir: Path) -> None:
         if not spec or spec.startswith("#"):
             continue
         try:
-            # Only request if not already installed
-            from app.services.package_service import _normalise_name, parse_spec
+            from app.services.package_service import parse_spec
             name, _ = parse_spec(spec)
             existing = PackageInstallation.query.filter_by(
                 agent_id=agent.id, name=name
@@ -306,5 +337,10 @@ def get_agent_tool_definitions(agent):
 
 
 def get_enabled_skills(agent):
-    """Get enabled skills for an agent."""
-    return Skill.query.filter_by(agent_id=agent.id, enabled=True).all()
+    """Get enabled skills for an agent via the agent_skills junction table."""
+    return (
+        Skill.query
+        .join(AgentSkill, AgentSkill.skill_id == Skill.id)
+        .filter(AgentSkill.agent_id == agent.id, AgentSkill.enabled.is_(True))
+        .all()
+    )

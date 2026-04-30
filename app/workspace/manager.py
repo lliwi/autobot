@@ -33,7 +33,7 @@ def scaffold_workspace(slug):
                 shutil.copytree(src, dest)
 
     # Create standard subdirectories (no-op if already copied from template)
-    for subdir in ("skills", "tools", "agents", "runs", "patches", "tests"):
+    for subdir in ("tools", "agents", "runs", "patches", "tests"):
         (workspace / subdir).mkdir(exist_ok=True)
 
     # Placeholder so the context builder always sees a PACKAGES.md.
@@ -46,6 +46,13 @@ def scaffold_workspace(slug):
         )
 
     return str(workspace)
+
+
+def get_global_skills_path():
+    """Return the shared skills directory: workspaces/_global/skills/."""
+    path = _base_path() / "_global" / "skills"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
 
 
 def get_workspace_path(agent):

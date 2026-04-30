@@ -1,13 +1,12 @@
 import json
 import re
-import shutil
-from pathlib import Path
+from datetime import datetime, timezone
 
 from app.extensions import db
 from app.models.agent import Agent
-from app.models.skill import Skill
-from app.workspace.discovery import sync_skills_to_db
-from app.workspace.manager import get_workspace_path
+from app.models.skill import AgentSkill, Skill
+from app.workspace.discovery import sync_global_skills_to_db
+from app.workspace.manager import get_global_skills_path
 
 
 def _slugify(name):
@@ -15,29 +14,42 @@ def _slugify(name):
 
 
 def list_skills(agent_id=None):
-    query = Skill.query
+    """Return skills. When agent_id is given, only skills assigned to that agent."""
     if agent_id:
-        query = query.filter_by(agent_id=agent_id)
-    return query.order_by(Skill.name).all()
+        return (
+            Skill.query
+            .join(AgentSkill, AgentSkill.skill_id == Skill.id)
+            .filter(AgentSkill.agent_id == agent_id)
+            .order_by(Skill.name)
+            .all()
+        )
+    return Skill.query.order_by(Skill.name).all()
 
 
 def get_skill(skill_id):
     return db.session.get(Skill, skill_id)
 
 
+def get_agent_skill(skill_id, agent_id):
+    """Return the AgentSkill junction row for (skill, agent), or None."""
+    return AgentSkill.query.filter_by(skill_id=skill_id, agent_id=agent_id).first()
+
+
 def create_skill(agent_id, data):
-    """Create a skill: scaffold filesystem structure and DB row."""
+    """Create a global skill: scaffold filesystem in _global/skills/ and create DB rows."""
     agent = db.session.get(Agent, agent_id)
     if agent is None:
         raise ValueError("Agent not found")
 
     name = data["name"]
     slug = _slugify(name)
-    workspace = get_workspace_path(agent)
-    skill_dir = workspace / "skills" / slug
+
+    if Skill.query.filter_by(slug=slug).first():
+        raise ValueError(f"A skill with slug '{slug}' already exists in the global catalog")
+
+    skill_dir = get_global_skills_path() / slug
     skill_dir.mkdir(parents=True, exist_ok=True)
 
-    # Write manifest
     manifest = {
         "name": name,
         "description": data.get("description", ""),
@@ -45,45 +57,49 @@ def create_skill(agent_id, data):
     }
     (skill_dir / "manifest.json").write_text(json.dumps(manifest, indent=2), encoding="utf-8")
 
-    # Write SKILL.md
     skill_md = data.get("skill_md", f"# {name}\n\n{data.get('description', '')}\n")
     (skill_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
 
     skill = Skill(
-        agent_id=agent_id,
         name=name,
         slug=slug,
         version=manifest["version"],
         description=manifest["description"],
         source="manual",
-        enabled=True,
         manifest_json=manifest,
         path=f"skills/{slug}",
     )
     db.session.add(skill)
+    db.session.flush()
+
+    agent_skill = AgentSkill(
+        agent_id=agent_id,
+        skill_id=skill.id,
+        enabled=True,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.session.add(agent_skill)
     db.session.commit()
     return skill
 
 
-def toggle_skill(skill_id):
-    skill = db.session.get(Skill, skill_id)
-    if skill is None:
+def toggle_skill(skill_id, agent_id):
+    """Toggle enabled on the AgentSkill row for (skill, agent)."""
+    ags = AgentSkill.query.filter_by(skill_id=skill_id, agent_id=agent_id).first()
+    if ags is None:
         return None
-    skill.enabled = not skill.enabled
+    ags.enabled = not ags.enabled
     db.session.commit()
-    return skill
+    return ags
 
 
 def reload_skill(skill_id):
-    """Re-read manifest from filesystem and update DB row."""
+    """Re-read manifest from _global/skills/ and update the Skill row."""
     skill = db.session.get(Skill, skill_id)
     if skill is None:
         return None
 
-    agent = db.session.get(Agent, skill.agent_id)
-    workspace = get_workspace_path(agent)
-    manifest_path = workspace / skill.path / "manifest.json"
-
+    manifest_path = get_global_skills_path() / skill.slug / "manifest.json"
     if not manifest_path.exists():
         return skill
 
@@ -106,52 +122,44 @@ def reload_skill(skill_id):
 
 
 def sync_agent_skills(agent_id):
+    """Sync global skills to DB and ensure junction rows exist for the agent."""
     agent = db.session.get(Agent, agent_id)
     if agent is None:
         return []
-    return sync_skills_to_db(agent)
+    return sync_global_skills_to_db(agent)
 
 
-def share_skill(skill_id, target_agent_id):
-    """Copy a skill's filesystem directory from its source agent to a target agent
-    and create the corresponding Skill row. Returns the new Skill or raises ValueError.
+def assign_skill_to_agent(skill_id, agent_id):
+    """Create an AgentSkill row giving the agent access to a global skill.
+
+    Returns the AgentSkill row. Raises ValueError if already assigned.
     """
-    source = db.session.get(Skill, skill_id)
-    if source is None:
+    skill = db.session.get(Skill, skill_id)
+    if skill is None:
         raise ValueError("Skill not found")
+    agent = db.session.get(Agent, agent_id)
+    if agent is None:
+        raise ValueError("Agent not found")
 
-    source_agent = db.session.get(Agent, source.agent_id)
-    target_agent = db.session.get(Agent, target_agent_id)
-    if target_agent is None:
-        raise ValueError("Target agent not found")
-    if source_agent is None:
-        raise ValueError("Source agent not found")
-    if source_agent.id == target_agent.id:
-        raise ValueError("Source and target agents are the same")
-
-    existing = Skill.query.filter_by(agent_id=target_agent.id, slug=source.slug).first()
+    existing = AgentSkill.query.filter_by(skill_id=skill_id, agent_id=agent_id).first()
     if existing is not None:
-        raise ValueError(f"Agent '{target_agent.name}' already has a skill with slug '{source.slug}'")
+        raise ValueError(f"Agent '{agent.name}' already has skill '{skill.slug}' assigned")
 
-    source_dir = get_workspace_path(source_agent) / source.path
-    target_dir = get_workspace_path(target_agent) / source.path
-    if not source_dir.exists():
-        raise ValueError(f"Source skill directory missing: {source_dir}")
-
-    target_dir.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copytree(source_dir, target_dir)
-
-    copy = Skill(
-        agent_id=target_agent.id,
-        name=source.name,
-        slug=source.slug,
-        version=source.version,
-        description=source.description,
-        source=source.source,
+    ags = AgentSkill(
+        agent_id=agent_id,
+        skill_id=skill_id,
         enabled=True,
-        manifest_json=source.manifest_json,
-        path=source.path,
+        created_at=datetime.now(timezone.utc),
     )
-    db.session.add(copy)
+    db.session.add(ags)
     db.session.commit()
-    return copy
+    return ags
+
+
+def remove_skill_from_agent(skill_id, agent_id):
+    """Remove an AgentSkill assignment. Does not delete the global Skill row."""
+    ags = AgentSkill.query.filter_by(skill_id=skill_id, agent_id=agent_id).first()
+    if ags is None:
+        raise ValueError("Assignment not found")
+    db.session.delete(ags)
+    db.session.commit()

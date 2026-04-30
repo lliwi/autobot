@@ -53,7 +53,13 @@ def propose_change(agent_id, target_path, new_content, title, reason, run_id=Non
     if agent is None:
         raise ValueError("Agent not found")
 
-    workspace = get_workspace_path(agent)
+    # Paths starting with _global/ are resolved from the base workspace dir,
+    # not the agent's own workspace (used for global skill catalog files).
+    if target_path.startswith("_global/"):
+        from flask import current_app
+        workspace = Path(current_app.config["WORKSPACES_BASE_PATH"]).resolve()
+    else:
+        workspace = get_workspace_path(agent)
     file_path = workspace / target_path
     is_new = not file_path.exists()
 

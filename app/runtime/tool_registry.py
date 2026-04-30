@@ -556,7 +556,7 @@ def _read_workspace_file(_agent=None, _run_id=None, filename=None, path=None, fi
         return {"error": "No agent context"}
     # Accept common aliases the model might emit.
     filename = filename or path or file or name
-    from app.workspace.manager import list_files, read_file
+    from app.workspace.manager import get_global_skills_path, list_files, read_file
 
     if not filename:
         available = list_files(_agent)
@@ -567,7 +567,17 @@ def _read_workspace_file(_agent=None, _run_id=None, filename=None, path=None, fi
         }
 
     available = list_files(_agent)
-    if filename not in available:
+    content = None
+
+    if filename in available:
+        content = read_file(_agent, filename)
+    elif filename.startswith("skills/"):
+        # Skills are now global — fall back to _global/skills/
+        global_file = get_global_skills_path().parent / filename
+        if global_file.exists():
+            content = global_file.read_text(encoding="utf-8")
+
+    if content is None:
         return {
             "error": f"File '{filename}' not found in workspace.",
             "available_files": available,
@@ -589,7 +599,7 @@ def _read_workspace_file(_agent=None, _run_id=None, filename=None, path=None, fi
             }
         seen.add(filename)
 
-    return {"filename": filename, "content": read_file(_agent, filename)}
+    return {"filename": filename, "content": content}
 
 
 def _list_workspace_files(_agent=None, **kwargs):
@@ -678,45 +688,29 @@ def _create_skill(_agent=None, _run_id=None, slug=None, title=None, summary=None
     if not _SKILL_SLUG_RE.match(slug):
         return {"error": "slug must be lowercase kebab-case (letters, digits, '-')."}
 
-    from app.services.patch_service import propose_change
+    from app.workspace.manager import get_global_skills_path
 
+    skill_dir = get_global_skills_path() / slug
     skill_md = f"# {title}\n\n{summary}\n\n{instructions}\n"
     manifest = {"name": slug, "description": summary, "version": "0.1.0"}
     outputs = []
+
     try:
-        manifest_patch = propose_change(
-            agent_id=_agent.id,
-            target_path=f"skills/{slug}/manifest.json",
-            new_content=json.dumps(manifest, indent=2) + "\n",
-            title=f"Create skill manifest '{slug}'",
-            reason=summary,
-            run_id=_run_id,
+        skill_dir.mkdir(parents=True, exist_ok=True)
+        (skill_dir / "manifest.json").write_text(
+            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
         )
-        outputs.append({"file": f"skills/{slug}/manifest.json", "patch_id": manifest_patch.id, "status": manifest_patch.status})
-        md_patch = propose_change(
-            agent_id=_agent.id,
-            target_path=f"skills/{slug}/SKILL.md",
-            new_content=skill_md,
-            title=f"Create skill '{slug}'",
-            reason=summary,
-            run_id=_run_id,
-        )
-        outputs.append({"file": f"skills/{slug}/SKILL.md", "patch_id": md_patch.id, "status": md_patch.status})
+        outputs.append({"file": f"_global/skills/{slug}/manifest.json", "status": "applied"})
+        (skill_dir / "SKILL.md").write_text(skill_md, encoding="utf-8")
+        outputs.append({"file": f"_global/skills/{slug}/SKILL.md", "status": "applied"})
         if code:
-            code_patch = propose_change(
-                agent_id=_agent.id,
-                target_path=f"skills/{slug}/skill.py",
-                new_content=code,
-                title=f"Create skill code for '{slug}'",
-                reason=summary,
-                run_id=_run_id,
-            )
-            outputs.append({"file": f"skills/{slug}/skill.py", "patch_id": code_patch.id, "status": code_patch.status})
-    except ValueError as e:
+            (skill_dir / "skill.py").write_text(code, encoding="utf-8")
+            outputs.append({"file": f"_global/skills/{slug}/skill.py", "status": "applied"})
+    except OSError as e:
         return {"error": str(e), "created": outputs}
 
-    from app.workspace.discovery import sync_skills_to_db
-    sync_skills_to_db(_agent)
+    from app.workspace.discovery import sync_global_skills_to_db
+    sync_global_skills_to_db(_agent)
 
     from app.services.review_service import review_creation
     review_payload = f"# {title}\n\n{summary}\n\n{instructions}"
@@ -724,7 +718,7 @@ def _create_skill(_agent=None, _run_id=None, slug=None, title=None, summary=None
         review_payload += f"\n\n---\n# skill.py\n```python\n{code}\n```"
     review = review_creation(_agent, "skill", slug, review_payload, run_id=_run_id)
 
-    result = {"slug": slug, "created": outputs, "message": "Skill scaffold written and indexed."}
+    result = {"slug": slug, "created": outputs, "message": "Skill written to global catalog and indexed."}
     if review is not None:
         result["review"] = review
     return result

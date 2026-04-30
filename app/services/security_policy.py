@@ -14,6 +14,9 @@ _LEVEL_1_PATTERNS = [
     r"^skills/[^/]+/manifest\.json$",
     r"^skills/[^/]+/SKILL\.md$",
     r"^tools/[^/]+/manifest\.json$",
+    # Global skill catalog paths
+    r"^_global/skills/[^/]+/manifest\.json$",
+    r"^_global/skills/[^/]+/SKILL\.md$",
 ]
 
 # Level 1 only for NEW files (creation, not modification)
@@ -22,15 +25,18 @@ _LEVEL_1_NEW_ONLY_PATTERNS = [
     r"^skills/[^/]+/",
     r"^tools/[^/]+/tool\.py$",
     r"^tools/[^/]+/",
+    r"^_global/skills/[^/]+/skill\.py$",
+    r"^_global/skills/[^/]+/",
 ]
 
 # Level 2 — requires approval
 _LEVEL_2_PATTERNS = [
     r"^AGENTS\.md$",
     r"^TOOLS\.md$",
-    r"^skills/[^/]+/skill\.py$",   # modification of existing
-    r"^tools/[^/]+/tool\.py$",     # modification of existing
-    r"^agents/",                    # sub-agent workspace files
+    r"^skills/[^/]+/skill\.py$",        # modification of existing
+    r"^tools/[^/]+/tool\.py$",          # modification of existing
+    r"^agents/",                          # sub-agent workspace files
+    r"^_global/skills/[^/]+/skill\.py$", # modification of global skill code
 ]
 
 # Level 3 — prohibited paths (anything outside workspace is implicitly level 3)
@@ -92,7 +98,7 @@ def classify_target_type(target_path):
         return "agents"
     if path in ("TOOLS.md", "SOUL.md"):
         return "config"
-    if path.startswith("skills/"):
+    if path.startswith("skills/") or path.startswith("_global/skills/"):
         return "skill"
     if path.startswith("tools/"):
         return "tool"
