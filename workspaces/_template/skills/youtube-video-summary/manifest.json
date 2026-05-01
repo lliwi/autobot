@@ -1,0 +1,5 @@
+{
+  "name": "youtube-video-summary",
+  "description": "Resume v\u00eddeos de YouTube priorizando transcripciones existentes y usando transcripci\u00f3n local cuando no existan subt\u00edtulos. \u00dasala cuando el usuario proporcione una URL de YouTube y quiera decidir r\u00e1pido si merece ver el v\u00eddeo.",
+  "version": "0.1.0"
+}
