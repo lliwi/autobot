@@ -2,20 +2,6 @@
 
 Control Home Assistant smart home devices using the Assist (Conversation) API by passing natural language directly to Home Assistant's built-in NLU for fast, token-efficient control.
 
----
-name: homeassistant-assist
-description: Control Home Assistant smart home devices using the Assist (Conversation) API. Use this skill when the user wants to control smart home entities - lights, switches, thermostats, covers, vacuums, media players, or any other smart device. Passes natural language directly to Home Assistant's built-in NLU for fast, token-efficient control.
-homepage: https://github.com/DevelopmentCats/homeassistant-assist
-metadata:
-  openclaw:
-    emoji: "🏠"
-    requires:
-      bins: ["curl"]
-      env: ["HASS_SERVER", "HASS_TOKEN"]
-    primaryEnv: "HASS_TOKEN"
----
-
-# Home Assistant Assist
 
 Control smart home devices by passing natural language to Home Assistant's Assist (Conversation) API. **Fire and forget** — trust Assist to handle intent parsing, entity resolution, and execution.
 
@@ -28,10 +14,12 @@ Use this skill when the user wants to **control or query any smart home device**
 Pass the user's request directly to Assist:
 
 ```bash
+# Build the JSON payload safely to avoid shell injection from user input
+PAYLOAD=$(jq -n --arg text "USER REQUEST HERE" --arg lang "en" '{text: $text, language: $lang}')
 curl -s -X POST "$HASS_SERVER/api/conversation/process" \
   -H "Authorization: Bearer $HASS_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"text": "USER REQUEST HERE", "language": "en"}'
+  -d "$PAYLOAD"
 ```
 
 **Trust Assist.** It handles:
@@ -65,15 +53,18 @@ These are **suggestions for improving HA config**, not skill failures. The skill
 
 ## Setup
 
-Set environment variables in OpenClaw config:
+Store your Home Assistant credentials using the platform credential store:
 
-```json
-{
-  "env": {
-    "HASS_SERVER": "https://your-homeassistant-url",
-    "HASS_TOKEN": "your-long-lived-access-token"
-  }
-}
+```
+set_credential(name="hass_token", value="your-long-lived-access-token", description="Home Assistant long-lived access token")
+set_credential(name="hass_server", value="https://your-homeassistant-url", description="Home Assistant base URL")
+```
+
+Then retrieve them at runtime:
+
+```
+HASS_TOKEN = get_credential("hass_token")["value"]
+HASS_SERVER = get_credential("hass_server")["value"]
 ```
 
 Generate a token: Home Assistant → Profile → Long-Lived Access Tokens → Create Token
