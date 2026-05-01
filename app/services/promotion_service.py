@@ -199,7 +199,7 @@ def create_promotion_pr(agent_id: int | None, item_type: str, slug: str) -> dict
         if template_dir.exists():
             shutil.rmtree(template_dir)
 
-    except subprocess.CalledProcessError as exc:
+    except Exception as exc:
         # Try to return to original branch if possible
         try:
             _git("checkout", "-", cwd=repo_root)
@@ -208,8 +208,9 @@ def create_promotion_pr(agent_id: int | None, item_type: str, slug: str) -> dict
         # Also clean up local template copy on failure
         if template_dir.exists():
             shutil.rmtree(template_dir)
+        err = getattr(exc, "stderr", None) or str(exc)
         return {"ok": False, "pr_url": None, "branch": branch,
-                "error": f"Git/gh error: {exc.stderr or exc}"}
+                "error": f"Git/gh error: {err}"}
 
     logger.info("Promotion PR created: %s (branch: %s)", pr_url, branch)
     return {"ok": True, "pr_url": pr_url, "branch": branch, "error": None}
@@ -597,29 +598,84 @@ def _git(*args, cwd=None):
     return result.stdout.strip()
 
 
-_DEFAULT_REPO = "https://github.com/lliwi/autobot"
-
-
 def _gh_pr_create(branch: str, title: str, body: str, cwd=None, gh_token: str = "") -> str:
-    repo = os.environ.get("AUTOBOT_GITHUB_REPO", "").strip() or _DEFAULT_REPO
-    cmd = ["gh", "pr", "create", "--title", title, "--body", body, "--head", branch, "--repo", repo]
-    try:
-        result = subprocess.run(
-            cmd,
-            cwd=cwd,
-            capture_output=True,
-            text=True,
-            check=True,
-            env={**os.environ, "GH_TOKEN": gh_token},
+    """Create a GitHub PR via the REST API — no gh CLI required."""
+    import json
+    import urllib.error
+    import urllib.request
+
+    repo_url = os.environ.get("AUTOBOT_GITHUB_REPO", "").strip()
+    if not repo_url:
+        raise RuntimeError(
+            "AUTOBOT_GITHUB_REPO no está configurado. "
+            "Añade AUTOBOT_GITHUB_REPO=https://github.com/owner/repo en .env"
         )
-        # gh pr create prints the PR URL on the last line
-        return result.stdout.strip().splitlines()[-1]
-    except subprocess.CalledProcessError as exc:
-        # If the PR already exists, gh outputs the URL in stderr
-        for line in (exc.stderr or "").splitlines():
-            if "github.com" in line and "/pull/" in line:
-                return line.strip()
-        raise
+
+    # Extract owner/repo from URL: https://github.com/owner/repo[.git]
+    m = re.search(r"github\.com[:/](.+?)(?:\.git)?$", repo_url)
+    if not m:
+        raise RuntimeError(f"No se puede parsear el repo de GitHub desde: {repo_url}")
+    owner_repo = m.group(1)
+
+    # Determine base branch
+    base_branch = os.environ.get("AUTOBOT_GITHUB_BASE_BRANCH", "main")
+
+    api_url = f"https://api.github.com/repos/{owner_repo}/pulls"
+    payload = json.dumps({
+        "title": title,
+        "body": body,
+        "head": branch,
+        "base": base_branch,
+    }).encode("utf-8")
+
+    req = urllib.request.Request(
+        api_url,
+        data=payload,
+        headers={
+            "Authorization": f"token {gh_token}",
+            "Accept": "application/vnd.github.v3+json",
+            "Content-Type": "application/json",
+            "User-Agent": "autobot/1.0",
+        },
+        method="POST",
+    )
+
+    try:
+        with urllib.request.urlopen(req) as resp:
+            data = json.loads(resp.read())
+            return data["html_url"]
+    except urllib.error.HTTPError as exc:
+        err_body = exc.read().decode("utf-8", errors="replace")
+        # 422 = PR already exists for this branch
+        if exc.code == 422:
+            existing = _find_existing_pr(owner_repo, branch, gh_token)
+            if existing:
+                return existing
+        raise RuntimeError(f"GitHub API {exc.code}: {err_body}") from exc
+
+
+def _find_existing_pr(owner_repo: str, branch: str, gh_token: str) -> str | None:
+    """Return the HTML URL of an open PR for ``branch``, or None."""
+    import json
+    import urllib.request
+
+    api_url = f"https://api.github.com/repos/{owner_repo}/pulls?head={branch}&state=open"
+    req = urllib.request.Request(
+        api_url,
+        headers={
+            "Authorization": f"token {gh_token}",
+            "Accept": "application/vnd.github.v3+json",
+            "User-Agent": "autobot/1.0",
+        },
+    )
+    try:
+        with urllib.request.urlopen(req) as resp:
+            prs = json.loads(resp.read())
+            if prs:
+                return prs[0]["html_url"]
+    except Exception:
+        pass
+    return None
 
 
 def _git_branch_exists(branch: str) -> bool:
