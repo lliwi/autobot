@@ -67,6 +67,9 @@ def _split_repo(repo: Optional[str]) -> Tuple[str, str]:
     owner, name = repo.strip().split("/", 1)
     if not owner or not name or "/" in name:
         raise ValueError("repo must be in owner/repo format")
+    _SLUG_RE = re.compile(r'^[a-zA-Z0-9._-]+$')
+    if not _SLUG_RE.match(owner) or not _SLUG_RE.match(name):
+        raise ValueError("owner/repo must only contain alphanumeric, '.', '_', '-'")
     return owner, name
 
 
@@ -102,7 +105,10 @@ def create_issue(_agent: Any, repo: Optional[str], title: str, body: str, labels
         cmd = ["gh", "issue", "create", "--repo", repo, "--title", title, "--body", body]
         for label in labels:
             cmd.extend(["--label", label])
-        proc = subprocess.run(cmd, text=True, capture_output=True, timeout=60)
+        try:
+            proc = subprocess.run(cmd, text=True, capture_output=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "gh CLI timed out after 60s"}
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr.strip() or proc.stdout.strip())
         return {"ok": True, "method": "gh", "repo": repo, "url": proc.stdout.strip()}
@@ -132,7 +138,10 @@ def create_pr(_agent: Any, repo: Optional[str], title: str, head: str, base: str
         cmd = ["gh", "pr", "create", "--repo", repo, "--title", title, "--head", head, "--base", base, "--body", body]
         if draft:
             cmd.append("--draft")
-        proc = subprocess.run(cmd, text=True, capture_output=True, timeout=60)
+        try:
+            proc = subprocess.run(cmd, text=True, capture_output=True, timeout=60)
+        except subprocess.TimeoutExpired:
+            return {"ok": False, "error": "gh CLI timed out after 60s"}
         if proc.returncode != 0:
             raise RuntimeError(proc.stderr.strip() or proc.stdout.strip())
         return {"ok": True, "method": "gh", "repo": repo, "url": proc.stdout.strip()}
