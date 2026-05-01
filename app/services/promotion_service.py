@@ -176,7 +176,14 @@ def create_promotion_pr(agent_id: int | None, item_type: str, slug: str) -> dict
 
         rel_template = template_dir.relative_to(repo_root)
         _git("add", "-f", str(rel_template), cwd=repo_root)
-        _git("commit", "-m", commit_msg, cwd=repo_root)
+        git_email = os.environ.get("GIT_AUTHOR_EMAIL", "autobot@autobot.local")
+        git_name = os.environ.get("GIT_AUTHOR_NAME", "Autobot")
+        _git(
+            "-c", f"user.email={git_email}",
+            "-c", f"user.name={git_name}",
+            "commit", "-m", commit_msg,
+            cwd=repo_root,
+        )
         _git("push", "origin", branch, cwd=repo_root)
 
         pr_url = _gh_pr_create(branch, pr_title, pr_body, cwd=repo_root, gh_token=gh_token)
