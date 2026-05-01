@@ -184,17 +184,30 @@ def create_promotion_pr(agent_id: int | None, item_type: str, slug: str) -> dict
             "commit", "-m", commit_msg,
             cwd=repo_root,
         )
-        _git("push", "origin", branch, cwd=repo_root)
+        # Embed token in the push URL so git doesn't prompt for credentials.
+        repo_url = os.environ.get("AUTOBOT_GITHUB_REPO", "").strip() or _DEFAULT_REPO
+        push_url = _inject_token(repo_url, gh_token)
+        _git("push", push_url, branch, cwd=repo_root)
 
         pr_url = _gh_pr_create(branch, pr_title, pr_body, cwd=repo_root, gh_token=gh_token)
 
         _git("checkout", original, cwd=repo_root)
+
+        # workspaces/ is gitignored so checkout doesn't remove the template copy.
+        # Delete it so is_promoted_to_template() only returns True once the PR
+        # is merged and the files land in the codebase.
+        if template_dir.exists():
+            shutil.rmtree(template_dir)
+
     except subprocess.CalledProcessError as exc:
         # Try to return to original branch if possible
         try:
             _git("checkout", "-", cwd=repo_root)
         except Exception:
             pass
+        # Also clean up local template copy on failure
+        if template_dir.exists():
+            shutil.rmtree(template_dir)
         return {"ok": False, "pr_url": None, "branch": branch,
                 "error": f"Git/gh error: {exc.stderr or exc}"}
 
@@ -550,7 +563,8 @@ def _resolve_gh_token() -> str | None:
     Lookup order:
       1. Global credential named 'gh_token' in the DB (encrypted at rest).
       2. AUTOBOT_CRED_GH_TOKEN env var (handled by credential_service fallback).
-      3. GH_TOKEN env var (direct, for backwards compatibility).
+      3. GH_TOKEN env var.
+      4. GITHUB_TOKEN env var (alias used by GitHub Actions and some CI setups).
     """
     try:
         from app.services.credential_service import get_credential_value
@@ -559,7 +573,17 @@ def _resolve_gh_token() -> str | None:
             return value
     except Exception:
         pass
-    return os.environ.get("GH_TOKEN") or None
+    return os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or None
+
+
+def _inject_token(repo_url: str, token: str) -> str:
+    """Insert a GitHub token into an HTTPS URL for passwordless git push.
+
+    https://github.com/org/repo  →  https://<token>@github.com/org/repo
+    """
+    if token and "github.com" in repo_url and repo_url.startswith("https://"):
+        return repo_url.replace("https://", f"https://{token}@", 1)
+    return repo_url
 
 
 def _git(*args, cwd=None):
