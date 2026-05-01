@@ -1,0 +1,5 @@
+{
+  "name": "matrix-audio-ingest-option-a",
+  "description": "Gu\u00eda para que el worker Matrix descargue audios mxc:// al workspace del agente y active la transcripci\u00f3n local. \u00dasala al integrar mensajes de voz/audio de Matrix con Whisper local.",
+  "version": "0.1.0"
+}
