@@ -1,0 +1,5 @@
+{
+  "name": "github",
+  "description": "Interact\u00faa con GitHub para crear issues y pull requests sobre errores o mejoras del c\u00f3digo del agente. Usa preferentemente `gh` CLI cuando est\u00e9 disponible y fallback por REST API con credencial `github_token` o `github`.",
+  "version": "0.1.0"
+}
