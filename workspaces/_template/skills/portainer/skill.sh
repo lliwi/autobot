@@ -59,6 +59,18 @@ case "$cmd" in
     api_get "/endpoints" | jq -r '.[] | "\(.Id): \(.Name) (\(if .Type == 1 then "local" else "remote" end)) - \(if .Status == 1 then "✓ online" else "✗ offline" end)"'
     ;;
 
+  running|ps)
+    endpoint="${2:-}"
+    filter="?status=running"
+    if [[ -n "$endpoint" ]]; then
+      api_get "/endpoints/$endpoint/docker/containers/json$filter" | jq -r '.[] | [(.Names[0] | ltrimstr("/")), .State, .Status] | @tsv'
+    else
+      for ep_id in $(api_get "/endpoints" | jq -r '.[].Id'); do
+        api_get "/endpoints/$ep_id/docker/containers/json$filter" | jq -r --arg ep "$ep_id" '.[] | [$ep, (.Names[0] | ltrimstr("/")), .State, .Status] | @tsv'
+      done
+    fi
+    ;;
+
   containers)
     endpoint="${2:-}"
     [[ -n "$endpoint" ]] || { echo "Usage: skill.sh containers <endpoint-id>" >&2; exit 1; }
@@ -129,6 +141,7 @@ Usage: bash skills/portainer/skill.sh <command> [args]
 Commands:
   status
   endpoints
+  running|ps [endpoint-id]   List running containers (all endpoints if omitted)
   containers <endpoint-id>
   stacks
   stack-info <id>
