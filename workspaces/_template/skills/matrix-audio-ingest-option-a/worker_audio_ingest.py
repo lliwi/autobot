@@ -150,7 +150,8 @@ def handle_matrix_audio_event(event, room_id, agent_slug, agent_workspace, downl
     rel_path = AUDIO_DIR + "/" + safe_event_hash(event_id, mxc_url) + ext
     workspace_root = Path(agent_workspace).resolve()
     target = workspace_root / rel_path
-    if workspace_root not in target.resolve().parents:
+    resolved = target.resolve()
+    if not (resolved == workspace_root or workspace_root in resolved.parents):
         raise ValueError("refusing to write outside agent workspace")
 
     atomic_write_bytes(target, data)
