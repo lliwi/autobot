@@ -11,11 +11,9 @@ import sys
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any, Dict, Iterable, List, Optional
+from typing import Any, Dict, List, Optional
 
 DEFAULT_PORTAINER_URL = "http://192.168.0.20:9000"
-ALLOWED_DEFAULT_HOSTS = {"192.168.0.20", "192.168.0.40", "localhost", "127.0.0.1"}
-
 PORTAINER_URL = ""
 PORTAINER_API_KEY = ""
 API_BASE = ""
@@ -232,7 +230,7 @@ def cmd_redeploy(stack_id: int):
         "env": stack.get("Env") or [],
         "prune": False,
         "pullImage": True,
-        "repositoryAuthentication": True,
+        "repositoryAuthentication": git_auth != 0,
         "repositoryGitCredentialID": git_auth,
     }
     result = api_request("PUT", f"/stacks/{stack_id}/git/redeploy?endpointId={endpoint_id}", payload)
