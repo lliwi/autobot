@@ -1,0 +1,5 @@
+{
+  "name": "cloudflare-zerotrust-ops",
+  "description": "Read-first Cloudflare Zero Trust operations using a stored API token credential. Use it to validate token access, list accounts/zones, and inspect tunnels safely.",
+  "version": "0.1.0"
+}
