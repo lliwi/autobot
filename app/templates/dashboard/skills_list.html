@@ -10,6 +10,7 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button type="submit" class="btn btn-primary">Sync from Workspace</button>
         </form>
+        <a href="{{ url_for('dashboard.skills_overview') }}" class="btn">Global catalog</a>
         <a href="{{ url_for('dashboard.agent_detail', agent_id=agent.id) }}" class="btn">Back to Agent</a>
     </div>
 </div>
@@ -20,11 +21,8 @@
         <tr>
             <th>Name</th>
             <th>Version</th>
-            <th>Source</th>
             <th>Description</th>
             <th>Status</th>
-            <th>Template</th>
-            <th>Actions</th>
         </tr>
     </thead>
     <tbody>
@@ -32,45 +30,22 @@
         {% set ags = agent_skills_map.get(skill.id) %}
         {% set is_enabled = ags and ags.enabled %}
         <tr>
-            <td><strong>{{ skill.name }}</strong><br><small><code>{{ skill.path }}</code></small></td>
+            <td><strong>{{ skill.name }}</strong><br><small><code>{{ skill.slug }}</code></small></td>
             <td>{{ skill.version }}</td>
-            <td>{{ skill.source }}</td>
             <td>{{ skill.description or '-' }}</td>
-            <td><span class="badge badge-{{ 'active' if is_enabled else 'inactive' }}">{{ 'Enabled' if is_enabled else 'Disabled' }}</span></td>
-            <td>
-                {% if skill.slug in promoted_slugs %}
-                    <span class="badge badge-active" title="Ya incluida en _template/">&#9733; En template</span>
-                {% else %}
-                    <span class="badge badge-inactive">&#9734; No promovida</span>
-                {% endif %}
-            </td>
             <td>
                 <form method="POST" action="{{ url_for('dashboard.skill_toggle', skill_id=skill.id) }}" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <input type="hidden" name="agent_id" value="{{ agent.id }}">
                     <button type="submit" class="btn btn-sm">{{ 'Disable' if is_enabled else 'Enable' }}</button>
                 </form>
-                <form method="POST" action="{{ url_for('dashboard.skill_reload', skill_id=skill.id) }}" style="display:inline;">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <input type="hidden" name="agent_id" value="{{ agent.id }}">
-                    <button type="submit" class="btn btn-sm">Reload</button>
-                </form>
-                {% if is_admin %}
-                <form method="POST" action="{{ url_for('dashboard.skill_promote_bundle', skill_id=skill.id) }}" style="display:inline;">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="btn btn-sm" title="Descargar bundle listo para PR manual">&#128230; Bundle</button>
-                </form>
-                <form method="POST" action="{{ url_for('dashboard.skill_promote_pr', skill_id=skill.id) }}" style="display:inline;">
-                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="btn btn-sm" title="Crear PR en GitHub (requiere GH_TOKEN)">&#128260; PR</button>
-                </form>
-                {% endif %}
+                <span class="badge badge-{{ 'active' if is_enabled else 'inactive' }}">{{ 'Enabled' if is_enabled else 'Disabled' }}</span>
             </td>
         </tr>
         {% endfor %}
     </tbody>
 </table>
 {% else %}
-<p class="empty-state">No skills assigned to this agent. Go to the <a href="{{ url_for('dashboard.skills_overview') }}">global catalog</a> to assign skills, or click "Sync from Workspace" to discover skills in <code>workspaces/_global/skills/</code>.</p>
+<p class="empty-state">No skills assigned to this agent. Go to the <a href="{{ url_for('dashboard.skills_overview') }}">global catalog</a> to assign skills.</p>
 {% endif %}
 {% endblock %}

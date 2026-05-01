@@ -16,6 +16,7 @@
             <th>Version</th>
             <th>Assigned agents</th>
             <th>Assign to agent</th>
+            <th>Actions</th>
         </tr>
     </thead>
     <tbody>
@@ -28,7 +29,12 @@
                 <small><code>{{ skill.slug }}</code></small>
                 {% if skill.description %}<br><small>{{ skill.description }}</small>{% endif %}
             </td>
-            <td>{{ skill.version }}</td>
+            <td>
+                {{ skill.version }}<br>
+                {% if skill.slug in promoted_slugs %}
+                    <span class="badge badge-active" title="Ya incluida en _template/">&#9733; template</span>
+                {% endif %}
+            </td>
             <td>
                 {% if assignments %}
                     {% for ags in assignments %}
@@ -63,6 +69,22 @@
                 </form>
                 {% else %}
                     <small style="color: var(--text-muted)">asignada a todos</small>
+                {% endif %}
+            </td>
+            <td>
+                <form method="POST" action="{{ url_for('dashboard.skill_reload', skill_id=skill.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm">Reload</button>
+                </form>
+                {% if is_admin %}
+                <form method="POST" action="{{ url_for('dashboard.skill_promote_bundle', skill_id=skill.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm" title="Descargar bundle listo para PR manual">&#128230; Bundle</button>
+                </form>
+                <form method="POST" action="{{ url_for('dashboard.skill_promote_pr', skill_id=skill.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm" title="Crear PR en GitHub (requiere GH_TOKEN)">&#128260; PR</button>
+                </form>
                 {% endif %}
             </td>
         </tr>

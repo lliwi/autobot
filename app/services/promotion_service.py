@@ -175,7 +175,7 @@ def create_promotion_pr(agent_id: int | None, item_type: str, slug: str) -> dict
         shutil.copytree(source_dir, template_dir)
 
         rel_template = template_dir.relative_to(repo_root)
-        _git("add", str(rel_template), cwd=repo_root)
+        _git("add", "-f", str(rel_template), cwd=repo_root)
         _git("commit", "-m", commit_msg, cwd=repo_root)
         _git("push", "origin", branch, cwd=repo_root)
 

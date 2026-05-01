@@ -34,11 +34,15 @@ def skills_overview():
     for ags in all_ags:
         skill_assignments.setdefault(ags.skill_id, []).append(ags)
 
+    promoted_slugs = {s.slug for s in skills if is_promoted_to_template("skill", s.slug)}
+
     return render_template(
         "dashboard/skills_overview.html",
         skills=skills,
         agents=agents,
         skill_assignments=skill_assignments,
+        promoted_slugs=promoted_slugs,
+        is_admin=(current_user.role == "admin"),
     )
 
 
@@ -123,14 +127,11 @@ def skill_toggle(skill_id):
 @dashboard_bp.route("/skills/<int:skill_id>/reload", methods=["POST"])
 @login_required
 def skill_reload(skill_id):
-    agent_id = request.form.get("agent_id", type=int)
     skill = reload_skill(skill_id)
     if skill is None:
         flash("Skill not found.", "danger")
-        return redirect(url_for("dashboard.overview"))
+        return redirect(url_for("dashboard.skills_overview"))
     flash(f"Skill '{skill.name}' reloaded.", "success")
-    if agent_id:
-        return redirect(url_for("dashboard.skills_list", agent_id=agent_id))
     return redirect(url_for("dashboard.skills_overview"))
 
 
