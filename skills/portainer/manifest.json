@@ -1,0 +1,5 @@
+{
+  "name": "portainer",
+  "description": "Control Docker containers and stacks via the Portainer API using the stored `portainer` credential plus configured Portainer URL. Use it to list endpoints, containers, stacks, fetch logs, and perform start/stop/restart or stack redeploy actions with care.",
+  "version": "0.1.1"
+}
