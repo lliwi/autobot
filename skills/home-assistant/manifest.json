@@ -1,0 +1,5 @@
+{
+  "name": "home-assistant",
+  "description": "Control Home Assistant smart home devices using the Assist (Conversation) API by passing natural language directly to Home Assistant's built-in NLU for fast, token-efficient control.",
+  "version": "0.1.1"
+}
