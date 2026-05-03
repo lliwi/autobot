@@ -21,3 +21,5 @@ workspaces/
 .venv/
 venv/
 backups/
+
+docker-compose.yml
