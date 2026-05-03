@@ -13,6 +13,7 @@ RUN apt-get update && \
         hydra \
         john \
         wpscan \
+        whatweb \
         enum4linux \
         ca-certificates && \
     rm -rf /var/lib/apt/lists/*
