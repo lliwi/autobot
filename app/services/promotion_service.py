@@ -185,7 +185,12 @@ def create_promotion_pr(agent_id: int | None, item_type: str, slug: str) -> dict
             cwd=repo_root,
         )
         # Embed token in the push URL so git doesn't prompt for credentials.
-        repo_url = os.environ.get("AUTOBOT_GITHUB_REPO", "").strip() or _DEFAULT_REPO
+        repo_url = os.environ.get("AUTOBOT_GITHUB_REPO", "").strip()
+        if not repo_url:
+            raise RuntimeError(
+                "AUTOBOT_GITHUB_REPO no está configurado. "
+                "Añade AUTOBOT_GITHUB_REPO=https://github.com/owner/repo en .env"
+            )
         push_url = _inject_token(repo_url, gh_token)
         _git("push", push_url, branch, cwd=repo_root)
 

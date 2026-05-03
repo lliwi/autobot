@@ -45,6 +45,10 @@ class Config:
     # disable the limit entirely.
     PATCHES_PER_HOUR_PER_AGENT = int(os.environ.get("PATCHES_PER_HOUR_PER_AGENT", "30"))
 
+    # Kali MCP Server
+    KALI_MCP_URL = os.environ.get("KALI_MCP_URL", "http://kali:8000")
+    KALI_MCP_TIMEOUT = int(os.environ.get("KALI_MCP_TIMEOUT", "120"))
+
     # Matrix
     MATRIX_HOMESERVER = os.environ.get("MATRIX_HOMESERVER", "")
     MATRIX_USER_ID = os.environ.get("MATRIX_USER_ID", "")

@@ -14,6 +14,7 @@ services:
     depends_on:
       - postgres
       - redis
+      - kali
 
   worker:
     build:
@@ -27,8 +28,21 @@ services:
     depends_on:
       - postgres
       - redis
+      - kali
     command: ["python", "worker.py"]
     restart: unless-stopped
+
+  kali:
+    build:
+      context: .
+      dockerfile: Dockerfile.kali
+    restart: unless-stopped
+    env_file:
+      - .env
+    # No ports: mapping — only reachable inside Docker bridge by service name kali:8000
+    cap_add:
+      - NET_RAW    # nmap SYN scans, raw packet capture
+      - NET_ADMIN  # interface/routing changes needed by some pentest tools
 
   postgres:
     image: postgres:16
