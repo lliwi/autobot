@@ -1,0 +1,5 @@
+{
+  "name": "notion-pages",
+  "description": "Interactúa con la API de Notion usando la credencial `notion` para listar páginas y crear páginas o subpáginas.",
+  "version": "0.1.1"
+}
