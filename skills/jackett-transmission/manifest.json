@@ -1,0 +1,5 @@
+{
+  "name": "jackett-transmission",
+  "description": "Busca torrents con Jackett y gestiona descargas en Transmission. Úsala cuando el usuario quiera buscar contenido, revisar resultados y encolar una descarga en su cliente Transmission.",
+  "version": "0.1.1"
+}
