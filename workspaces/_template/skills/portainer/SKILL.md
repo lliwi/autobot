@@ -1,20 +1,43 @@
 ---
 name: portainer
 description: Control Docker containers and stacks via Portainer API. List containers, start/stop/restart, view logs, and redeploy stacks from git.
+version: 0.1.1
 metadata:
-  openclaw:
-    emoji: "🐳"
-    requires:
-      bins: ["python3"]
-      env: []
-    primaryCredential: "portainer"
+  autobot:
+    credential: "portainer"
+    base_url_source: "user configuration or PORTAINER_URL"
+    preferred_tools:
+      - "portainer-containers-token"
+      - "portainer-container-restart-token"
+    compatibility: "Autobot credential-resolution compatibility release"
 ---
 
-# 🐳 Portainer Skill
+# Portainer Skill
 
 Control Docker containers and stacks through the Portainer REST API.
 
-## 🎯 Purpose
+## Version
+
+Current version: **0.1.1**
+
+### Changelog
+
+#### 0.1.1
+
+- Validated Portainer availability from Autobot using the stored `portainer` credential.
+- Confirmed endpoint discovery and running-container listing using the tokenized flow.
+- Documented the preferred Autobot-safe flow:
+  - retrieve the credential with `get_credential("portainer")`
+  - pass the token in memory to `portainer-containers-token` or `portainer-container-restart-token`
+  - never expose the token in shell commands, logs, or files
+- Documented that wrappers using implicit credential access may return false missing-credential errors in some runtimes.
+- Removed deployment-specific URLs, endpoint names and container inventories from the reusable template.
+
+#### 0.1.0
+
+- Initial Portainer skill for listing endpoints, containers and stacks, reading logs, and performing guarded operational actions.
+
+## Purpose
 
 Use this skill when the user wants to inspect or operate Docker infrastructure exposed in Portainer:
 - list environments/endpoints
@@ -26,36 +49,54 @@ Use this skill when the user wants to inspect or operate Docker infrastructure e
 - start/stop/restart containers
 - redeploy git-backed stacks
 
-## 🧠 Operating Rules
+## Operating Rules
 
 - Prefer **read-only commands first** when identifying the target.
-- For “qué docker están corriendo” / “list running containers”, use `running` with no endpoint unless the user specifies one.
+- For "qué docker están corriendo" / "list running containers", use `running` with no endpoint unless the user specifies one.
 - For actions on containers or stacks, use the exact name or ID returned by Portainer.
 - **Start / stop / restart / redeploy are operational changes**. In chat, require explicit user intent before executing them.
 - Do **not** assume a single endpoint for mutations; pass the endpoint explicitly unless the user clearly established the target environment first.
 - If Portainer returns an API error, relay the message exactly.
 
-## 🔐 Authentication
+## Authentication
 
-This skill uses:
-- stored credential `portainer`, passed as `PORTAINER_API_KEY` when invoking the script
-- optional environment variable `PORTAINER_URL`
+This skill uses the stored credential `portainer`. The credential is a Portainer API key sent as `X-API-Key`. Do not print, persist, or pass the token through shell command arguments.
 
-If `PORTAINER_URL` is absent, the Python runner defaults to:
+### Autobot preferred credential flow
 
-```bash
-http://192.168.0.20:9000
+1. Retrieve the credential in memory with `get_credential("portainer")`.
+2. Pass the returned token directly to one of the token-aware tools.
+
+```text
+portainer-containers-token(
+  token=<in-memory token>,
+  base_url=<configured-portainer-url>,
+  endpoint_id="",
+  only_running=true
+)
 ```
 
-Expected header:
+For container restarts:
 
-```bash
-X-API-Key: <token>
+```text
+portainer-container-restart-token(
+  token=<in-memory token>,
+  base_url=<configured-portainer-url>,
+  endpoint_id="<endpoint-id>",
+  container_id="<container-id-or-name>",
+  timeout=10
+)
 ```
 
-Do not print or persist the token.
+### Known wrapper limitation
 
-## ⚙️ Commands
+If a wrapper using implicit credential access returns `missing_credential_portainer` while `get_credential("portainer")` succeeds, use the tokenized flow above.
+
+## Portainer URL
+
+Configure the Portainer base URL through user input, workspace configuration, or `PORTAINER_URL`. Do not hard-code private deployment URLs in reusable templates.
+
+## Legacy script commands
 
 Run from the workspace after exporting `PORTAINER_API_KEY` safely in the process environment:
 
@@ -73,66 +114,30 @@ python3 skills/portainer/skill.py restart <container-name> <endpoint-id>
 python3 skills/portainer/skill.py logs <container-name> <endpoint-id> [tail-lines]
 ```
 
-Use `--json` for structured output:
+Use `--json` for structured output.
+
+Shell alternative (manual use):
 
 ```bash
-python3 skills/portainer/skill.py --json running
+bash skills/portainer/skill.sh status
+bash skills/portainer/skill.sh running [endpoint-id]
 ```
 
-## 📖 Examples
-
-### Status
-
-```bash
-python3 skills/portainer/skill.py status
-```
-
-### List endpoints
-
-```bash
-python3 skills/portainer/skill.py endpoints
-```
-
-### List running containers across all endpoints
-
-```bash
-python3 skills/portainer/skill.py running
-```
-
-### List all containers on endpoint 5
-
-```bash
-python3 skills/portainer/skill.py containers 5
-```
-
-### Redeploy a stack
-
-```bash
-python3 skills/portainer/skill.py redeploy 25
-```
-
-### Restart a container
-
-```bash
-python3 skills/portainer/skill.py restart minecraft 4
-```
-
-## 🔧 Notes
+## Notes
 
 - The Python runner is self-contained and does not depend on `curl` or `jq`.
-- `skill.sh` is kept for manual shell use, but the Python runner is preferred inside Autobot.
-- The API key is passed in the environment when invoking the script.
+- `skill.sh` is kept for manual shell use, but token-aware tools are preferred inside Autobot.
 - Endpoint IDs and `tail-lines` should be numeric.
 - `redeploy` reads stack metadata first to preserve env vars and git credential linkage when available.
 - If multiple endpoints contain similarly named containers, disambiguate by endpoint before acting.
 
-## 🧱 Response Guidance
+## Response Guidance
 
 - For read operations: summarize the relevant rows cleanly.
 - For running container lists: group by endpoint and include name + status.
 - For action operations: report the exact target and whether Portainer confirmed success.
 - For failures: include the exact API error text.
 
-## 🔗 Reference
+## Reference
 
 - [Portainer API docs](https://documentation.portainer.io/api/docs/)
