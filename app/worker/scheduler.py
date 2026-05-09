@@ -84,16 +84,17 @@ def _sync_jobs(app):
                 job_id = f"cron_{task.id}"
                 cron_job_ids.add(job_id)
                 try:
-                    tz = None
+                    tz_name = "UTC"
                     if task.timezone:
                         try:
-                            tz = ZoneInfo(task.timezone)
+                            ZoneInfo(task.timezone)  # validate only
+                            tz_name = task.timezone
                         except ZoneInfoNotFoundError:
                             logger.warning(
                                 "Unknown timezone %r for task %s; falling back to UTC",
                                 task.timezone, task.id,
                             )
-                    trigger = CronTrigger.from_crontab(task.schedule_expr, timezone=tz)
+                    trigger = CronTrigger.from_crontab(task.schedule_expr, timezone=tz_name)
                     _ensure_job(
                         job_id=job_id,
                         func=_execute_cron_task,
@@ -104,7 +105,7 @@ def _sync_jobs(app):
                     # time. Use the trigger directly rather than job.next_run_time
                     # because the latter is only populated after the scheduler
                     # starts, and _sync_jobs runs during init too.
-                    now = _dt.now(tz or _tz.utc)
+                    now = _dt.now(ZoneInfo(tz_name) if tz_name != "UTC" else _tz.utc)
                     next_fire = trigger.get_next_fire_time(None, now)
                     if next_fire is not None:
                         new_next = next_fire.astimezone(_tz.utc).replace(tzinfo=None)
@@ -115,7 +116,7 @@ def _sync_jobs(app):
                     logger.error(f"Invalid cron expression for task {task.id}: {e}")
 
         # Remove jobs for disabled/deleted tasks
-        expected_ids = heartbeat_job_ids | cron_job_ids | {"__sync_jobs"}
+        expected_ids = heartbeat_job_ids | cron_job_ids | {"__sync_jobs", "__drain_review_queue"}
         for job in _scheduler.get_jobs():
             if job.id not in expected_ids:
                 logger.info(f"Removing stale job: {job.id}")
@@ -175,12 +176,42 @@ def _drain_review_queue(app):
 def _execute_cron_task(app, task_id):
     """Execute a scheduled cron task."""
     with app.app_context():
+        from datetime import datetime as _dt
+        from datetime import timezone as _tz
+
+        from croniter import croniter as _croniter
+
         from app.services.chat_service import run_agent_non_streaming
         from app.services.scheduler_service import get_task, mark_task_executed, mark_task_failed
 
         task = get_task(task_id)
         if task is None or not task.enabled:
             return
+
+        # Pre-dispatch validation: guard against misfire across day-of-week boundary.
+        # APScheduler's misfire_grace_time allows late execution up to 300 s, but a
+        # delayed job near midnight could cross into an excluded day. Re-check that
+        # the previous cron fire time is within the grace window before proceeding.
+        try:
+            tz = _tz.utc
+            if task.timezone:
+                try:
+                    tz = ZoneInfo(task.timezone)
+                except ZoneInfoNotFoundError:
+                    pass
+            now_local = _dt.now(tz)
+            it = _croniter(task.schedule_expr, now_local)
+            prev_fire = it.get_prev(_dt)
+            elapsed = (now_local - prev_fire).total_seconds()
+            if elapsed > 300:  # matches misfire_grace_time
+                logger.warning(
+                    "Skipping cron task %s: %.0fs since last valid fire %s "
+                    "(expr=%r tz=%s) — possible day-of-week boundary misfire",
+                    task_id, elapsed, prev_fire, task.schedule_expr, task.timezone,
+                )
+                return
+        except Exception:
+            logger.warning("Pre-dispatch cron validation failed for task %s", task_id, exc_info=True)
 
         payload = task.payload_json or {}
         message = payload.get("message", f"[CRON] Execute scheduled task: {task.id}")
