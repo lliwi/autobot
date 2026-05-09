@@ -21,5 +21,6 @@ workspaces/
 .venv/
 venv/
 backups/
+kali/
 
 docker-compose.yml
