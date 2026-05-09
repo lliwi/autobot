@@ -1,6 +1,9 @@
 import json
+import logging
 import re
 from datetime import datetime, timezone
+
+logger = logging.getLogger(__name__)
 
 from app.extensions import db
 from app.models.agent import Agent
@@ -94,12 +97,43 @@ def toggle_skill(skill_id, agent_id):
 
 
 def reload_skill(skill_id):
-    """Re-read manifest from _global/skills/ and update the Skill row."""
+    """Re-read manifest from _global/skills/ and update the Skill row.
+
+    If the _template/ copy has a strictly higher version (semver), its files
+    are synced into _global/ first so the template always wins on Reload.
+    """
+    import shutil
+
+    from app.workspace.manager import get_template_path
+
     skill = db.session.get(Skill, skill_id)
     if skill is None:
         return None
 
-    manifest_path = get_global_skills_path() / skill.slug / "manifest.json"
+    global_dir = get_global_skills_path() / skill.slug
+    template_dir = get_template_path() / "skills" / skill.slug
+
+    # Sync template → global when template has a newer version
+    if template_dir.is_dir():
+        try:
+            from app.workspace.manifest import load_manifest
+            tmpl_manifest = load_manifest(template_dir / "manifest.json")
+            global_manifest = load_manifest(global_dir / "manifest.json") if (global_dir / "manifest.json").exists() else {}
+            if _version_gt(tmpl_manifest.get("version", "0"), global_manifest.get("version", "0")):
+                global_dir.mkdir(parents=True, exist_ok=True)
+                for src in template_dir.rglob("*"):
+                    if src.is_file():
+                        dst = global_dir / src.relative_to(template_dir)
+                        dst.parent.mkdir(parents=True, exist_ok=True)
+                        shutil.copy2(src, dst)
+                logger.info("reload_skill: synced %s from template (%s → %s)",
+                            skill.slug,
+                            global_manifest.get("version", "?"),
+                            tmpl_manifest.get("version", "?"))
+        except Exception:
+            logger.warning("reload_skill: template sync failed for %s", skill.slug, exc_info=True)
+
+    manifest_path = global_dir / "manifest.json"
     if not manifest_path.exists():
         return skill
 
@@ -119,6 +153,16 @@ def reload_skill(skill_id):
     skill.manifest_json = manifest
     db.session.commit()
     return skill
+
+
+def _version_gt(a: str, b: str) -> bool:
+    """Return True if semver string a is strictly greater than b."""
+    def _parse(v):
+        try:
+            return tuple(int(x) for x in str(v).split("."))
+        except ValueError:
+            return (0,)
+    return _parse(a) > _parse(b)
 
 
 def sync_agent_skills(agent_id):

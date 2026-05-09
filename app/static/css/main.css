@@ -580,6 +580,7 @@ input:focus, textarea:focus, select:focus {
 }
 .badge.amber { color: var(--amber); border-color: oklch(0.78 0.14 75 / 0.4); background: oklch(0.78 0.14 75 / 0.10); }
 .badge-inactive, .badge-pending { color: var(--fg-dim); border-color: var(--border); background: var(--bg-raised); }
+.badge-warning { color: var(--amber); border-color: oklch(0.78 0.14 75 / 0.4); background: oklch(0.78 0.14 75 / 0.10); }
 
 /* ---------- Stats ---------- */
 .stats-grid, .stat-grid {

@@ -1,3 +1,5 @@
+import json
+
 from flask import render_template, redirect, url_for, request, flash, send_file
 from flask_login import current_user, login_required
 
@@ -12,6 +14,7 @@ from app.services.promotion_service import (
     is_promoted_to_template,
 )
 from app.services.skill_service import (
+    _version_gt,
     assign_skill_to_agent,
     list_skills,
     reload_skill,
@@ -19,6 +22,7 @@ from app.services.skill_service import (
     sync_agent_skills,
     toggle_skill,
 )
+from app.workspace.manager import get_template_path
 
 
 @dashboard_bp.route("/skills")
@@ -36,12 +40,27 @@ def skills_overview():
 
     promoted_slugs = {s.slug for s in skills if is_promoted_to_template("skill", s.slug)}
 
+    # Detect when _template/ has a newer version than what's active in _global/
+    template_updates: dict[str, str] = {}
+    for s in skills:
+        if s.slug not in promoted_slugs:
+            continue
+        tmpl_manifest_path = get_template_path() / "skills" / s.slug / "manifest.json"
+        try:
+            tmpl = json.loads(tmpl_manifest_path.read_text(encoding="utf-8"))
+            tmpl_ver = tmpl.get("version", "")
+            if tmpl_ver and _version_gt(tmpl_ver, s.version or "0"):
+                template_updates[s.slug] = tmpl_ver
+        except Exception:
+            pass
+
     return render_template(
         "dashboard/skills_overview.html",
         skills=skills,
         agents=agents,
         skill_assignments=skill_assignments,
         promoted_slugs=promoted_slugs,
+        template_updates=template_updates,
         is_admin=(current_user.role == "admin"),
     )
 
