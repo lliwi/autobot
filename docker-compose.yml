@@ -39,6 +39,8 @@ services:
     restart: unless-stopped
     env_file:
       - .env
+    volumes:
+      - ./kali/wordlists/dirb:/usr/share/wordlists/dir
     # No ports: mapping — only reachable inside Docker bridge by service name kali:8000
     cap_add:
       - NET_RAW    # nmap SYN scans, raw packet capture
