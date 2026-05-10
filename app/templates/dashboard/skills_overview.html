@@ -30,12 +30,14 @@
                 {% if skill.description %}<br><small>{{ skill.description }}</small>{% endif %}
             </td>
             <td>
-                {{ skill.version }}<br>
-                {% if skill.slug in promoted_slugs %}
-                    <span class="badge badge-active" title="Ya incluida en _template/">&#9733; template</span>
-                {% endif %}
                 {% if skill.slug in template_updates %}
-                    <span class="badge badge-warning" title="Template tiene v{{ template_updates[skill.slug] }} — haz Reload para actualizar">&#8593; {{ template_updates[skill.slug] }}</span>
+                    {{ template_updates[skill.slug] }}<br>
+                    <span class="badge badge-warning" title="Instalada v{{ skill.version }} — haz Reload para actualizar al template">&#9733; template v{{ skill.version }}</span>
+                {% else %}
+                    {{ skill.version }}<br>
+                    {% if skill.slug in promoted_slugs %}
+                        <span class="badge badge-active" title="Ya incluida en _template/">&#9733; template</span>
+                    {% endif %}
                 {% endif %}
             </td>
             <td>
