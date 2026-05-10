@@ -122,6 +122,30 @@ docker compose run --rm web pytest                    # Ejecutar tests
 docker compose run --rm web pytest tests/test_auth.py # Ejecutar un test específico
 ```
 
+### Migraciones de base de datos
+
+Autobot usa **Alembic** (vía Flask-Migrate) para gestionar el esquema de PostgreSQL.
+
+```bash
+# Aplicar migraciones pendientes (obligatorio tras un git pull o restore)
+docker compose run --rm web flask db upgrade
+
+# Revertir la última migración
+docker compose run --rm web flask db downgrade
+
+# Crear una nueva migración al cambiar un modelo SQLAlchemy
+docker compose run --rm web flask db migrate -m "descripción del cambio"
+docker compose run --rm web flask db upgrade
+```
+
+**Cuándo ejecutar `flask db upgrade`:**
+
+- Tras un `git pull` que incluya nuevas migraciones en `migrations/versions/`
+- Tras restaurar un bundle con `scripts/restore.sh` (el bundle guarda datos, no el esquema)
+- En una instalación nueva, después del `flask onboard` (lo hace automáticamente)
+
+> Las migraciones son idempotentes: ejecutar `flask db upgrade` cuando ya está al día no hace nada.
+
 ### Backup y restauración
 
 Los scripts `scripts/backup.sh` y `scripts/restore.sh` son la forma recomendada de hacer copias y restaurar. Escriben en `./backups/` (bind-mounted en el contenedor como `/app/backups/`), por lo que los ficheros sobreviven a reinicios del contenedor.
