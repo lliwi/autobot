@@ -25,6 +25,8 @@ from app.services.patch_service import (
 def patches_list():
     agent_id = request.args.get("agent_id", type=int)
     status = request.args.get("status")
+    if status is None:
+        return redirect(url_for("dashboard.patches_list", status="pending_review"))
     patches = list_patches(agent_id=agent_id, status=status)
 
     agents = Agent.query.order_by(Agent.name).all()
