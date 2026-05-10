@@ -305,10 +305,34 @@ def load_tool_handler(agent, tool_name):
 # -- Agent tool resolution (used by agent_runner) --
 
 
+def _validate_parameters_schema(schema, path=""):
+    """Recursively check that a JSON Schema is valid for the Codex API.
+
+    Returns (True, None) or (False, error_description).
+    Arrays must declare 'items'; objects with 'properties' are recursed into.
+    """
+    if not isinstance(schema, dict):
+        return True, None
+    if schema.get("type") == "array" and "items" not in schema:
+        loc = f" at '{path}'" if path else ""
+        return False, f"array schema missing items{loc}"
+    for prop, sub in schema.get("properties", {}).items():
+        ok, msg = _validate_parameters_schema(sub, f"{path}.{prop}" if path else prop)
+        if not ok:
+            return False, msg
+    if "items" in schema:
+        ok, msg = _validate_parameters_schema(schema["items"], f"{path}[]")
+        if not ok:
+            return False, msg
+    return True, None
+
+
 def get_agent_tool_definitions(agent):
     """Get all tool definitions for an agent: builtins + enabled workspace tools.
 
     Returns list of dicts in OpenAI function-calling format.
+    Tools with invalid JSON Schema are skipped and logged so they never cause
+    a Codex API 400.
     """
     # Start with builtins
     definitions = list(get_builtin_definitions())
@@ -319,6 +343,15 @@ def get_agent_tool_definitions(agent):
     for tool in tools:
         manifest = tool.manifest_json or {}
         name = manifest.get("name", tool.name)
+        parameters = manifest.get("parameters", {"type": "object", "properties": {}})
+
+        ok, schema_error = _validate_parameters_schema(parameters)
+        if not ok:
+            logger.warning(
+                "Tool '%s' (agent %s) has invalid schema — skipping to avoid API 400: %s",
+                name, agent.slug, schema_error,
+            )
+            continue
 
         # Workspace tools override builtins with the same name
         if name in builtin_names:
@@ -329,7 +362,7 @@ def get_agent_tool_definitions(agent):
             "function": {
                 "name": name,
                 "description": manifest.get("description", tool.description or ""),
-                "parameters": manifest.get("parameters", {"type": "object", "properties": {}}),
+                "parameters": parameters,
             },
         })
 
