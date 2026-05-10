@@ -234,6 +234,12 @@ def register_cli(app):
         if include_env or include_secrets:
             click.echo("  ⚠ The bundle will contain secrets in plaintext. Protect the file accordingly.")
 
+        import os as _os
+        if _os.path.abspath(output).startswith("/tmp"):
+            click.echo("  ⚠ /tmp is ephemeral in Docker — the bundle will be lost on container restart.")
+            click.echo("    Use a bind-mounted path (e.g. /app/autobot-export.tar.gz) or copy it out:")
+            click.echo(f"    docker compose cp web:{output} ./")
+
         report = bundle_service.export_bundle(
             output,
             include_env=include_env,
