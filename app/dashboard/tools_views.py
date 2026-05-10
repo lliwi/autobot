@@ -14,6 +14,7 @@ from app.services.promotion_service import (
 )
 from app.services.tool_service import (
     list_tools,
+    reload_tool,
     sync_agent_tools,
     test_tool,
     toggle_tool,
@@ -84,6 +85,17 @@ def tools_sync(agent_id):
     tools = sync_agent_tools(agent_id)
     flash(f"Synced {len(tools)} tools from workspace.", "success")
     return redirect(url_for("dashboard.tools_list", agent_id=agent_id))
+
+
+@dashboard_bp.route("/tools/<int:tool_id>/reload", methods=["POST"])
+@login_required
+def tool_reload(tool_id):
+    tool = reload_tool(tool_id)
+    if tool is None:
+        flash("Tool not found.", "danger")
+        return redirect(url_for("dashboard.overview"))
+    flash(f"Tool '{tool.name}' reloaded (v{tool.version}).", "success")
+    return redirect(url_for("dashboard.tools_list", agent_id=tool.agent_id))
 
 
 @dashboard_bp.route("/tools/<int:tool_id>/toggle", methods=["POST"])

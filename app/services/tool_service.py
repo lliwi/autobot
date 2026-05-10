@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import shutil
 from pathlib import Path
@@ -9,15 +10,19 @@ from app.models.tool import Tool
 from app.workspace.discovery import load_tool_handler, sync_tools_to_db
 from app.workspace.manager import get_workspace_path
 
+logger = logging.getLogger(__name__)
+
 
 def _slugify(name):
     return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")
 
 
-def list_tools(agent_id=None):
+def list_tools(agent_id=None, include_disabled=False):
     query = Tool.query
     if agent_id:
         query = query.filter_by(agent_id=agent_id)
+    if not include_disabled:
+        query = query.filter_by(enabled=True)
     return query.order_by(Tool.name).all()
 
 
@@ -102,6 +107,44 @@ def test_tool(tool_id, test_input=None):
         return {"success": True, "result": result}
     except Exception as e:
         return {"success": False, "error": str(e)}
+
+
+def reload_tool(tool_id):
+    """Re-read manifest.json from the workspace and update the Tool row.
+
+    Mirrors reload_skill() in skill_service. Returns the (updated) Tool or
+    None if the tool_id doesn't exist.
+    """
+    tool = db.session.get(Tool, tool_id)
+    if tool is None:
+        return None
+
+    agent = db.session.get(Agent, tool.agent_id)
+    if agent is None:
+        return tool
+
+    manifest_path = get_workspace_path(agent) / tool.path / "manifest.json"
+    if not manifest_path.exists():
+        return tool
+
+    from app.workspace.manifest import load_manifest, validate_tool_manifest
+
+    try:
+        manifest = load_manifest(manifest_path)
+        errors = validate_tool_manifest(manifest)
+        if errors:
+            logger.warning("reload_tool %s: invalid manifest: %s", tool_id, errors)
+            return tool
+    except ValueError as exc:
+        logger.warning("reload_tool %s: could not load manifest: %s", tool_id, exc)
+        return tool
+
+    tool.name = manifest.get("name", tool.name)
+    tool.description = manifest.get("description", tool.description)
+    tool.version = manifest.get("version", tool.version)
+    tool.manifest_json = manifest
+    db.session.commit()
+    return tool
 
 
 def sync_agent_tools(agent_id):

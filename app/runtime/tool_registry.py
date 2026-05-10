@@ -211,6 +211,46 @@ def register_builtin_tools():
 
     register(
         ToolDefinition(
+            name="rename_tool",
+            description=(
+                "Rename an existing workspace tool: moves `tools/<old_slug>/` to "
+                "`tools/<new_slug>/`, updates manifest.name and the DB row, and "
+                "refreshes TOOLS.md. Use to fix versioned names (e.g. runner2 → runner)."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "old_slug": {"type": "string", "description": "Current tool directory name (kebab-case)."},
+                    "new_slug": {"type": "string", "description": "New tool directory name (kebab-case, no -vN suffixes)."},
+                },
+                "required": ["old_slug", "new_slug"],
+            },
+            handler=lambda **kwargs: _rename_tool(**kwargs),
+        )
+    )
+
+    register(
+        ToolDefinition(
+            name="delete_tool",
+            description=(
+                "Delete an existing workspace tool: removes `tools/<slug>/` from disk "
+                "and its DB row, then refreshes TOOLS.md. "
+                "Irreversible — use only for superseded or duplicate tools."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "slug": {"type": "string", "description": "Tool directory name to delete."},
+                    "reason": {"type": "string", "description": "Why this tool is being deleted (for audit log)."},
+                },
+                "required": ["slug", "reason"],
+            },
+            handler=lambda **kwargs: _delete_tool(**kwargs),
+        )
+    )
+
+    register(
+        ToolDefinition(
             name="fetch_url",
             description=(
                 "Fetch the contents of an HTTP(S) URL. Returns up to 200 KB of text. "
@@ -1012,6 +1052,106 @@ def _create_tool(_agent=None, _run_id=None, slug=None, description=None,
     if review is not None:
         result["review"] = review
     return result
+
+
+def _rename_tool(_agent=None, _run_id=None, old_slug=None, new_slug=None, **kwargs):
+    if _agent is None:
+        return {"error": "No agent context"}
+    if not old_slug or not new_slug:
+        return {"error": "Both old_slug and new_slug are required"}
+    if not _SKILL_SLUG_RE.match(new_slug):
+        return {"error": "new_slug must be lowercase kebab-case (no version suffixes)"}
+    if old_slug == new_slug:
+        return {"error": "old_slug and new_slug are identical"}
+
+    from app.extensions import db
+    from app.models.tool import Tool
+    from app.workspace.manager import get_workspace_path
+
+    old_tool = Tool.query.filter_by(agent_id=_agent.id, slug=old_slug).first()
+    if old_tool is None:
+        return {"error": f"Tool '{old_slug}' not found in this agent's workspace"}
+
+    if Tool.query.filter_by(agent_id=_agent.id, slug=new_slug).first():
+        return {"error": f"Tool '{new_slug}' already exists — choose a different name"}
+
+    workspace = get_workspace_path(_agent)
+    old_dir = workspace / "tools" / old_slug
+    new_dir = workspace / "tools" / new_slug
+
+    if not old_dir.exists():
+        return {"error": f"Directory 'tools/{old_slug}' not found on disk"}
+    if new_dir.exists():
+        return {"error": f"Directory 'tools/{new_slug}' already exists on disk"}
+
+    import shutil as _shutil
+    try:
+        _shutil.copytree(old_dir, new_dir)
+        # Update manifest.name in the copy
+        manifest_path = new_dir / "manifest.json"
+        if manifest_path.exists():
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+            manifest["name"] = new_slug
+            manifest_path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        _shutil.rmtree(old_dir)
+    except Exception as exc:
+        _shutil.rmtree(new_dir, ignore_errors=True)
+        return {"error": f"Filesystem error: {exc}"}
+
+    # Update DB row in-place (preserves ID and FK references)
+    old_tool.slug = new_slug
+    old_tool.name = new_slug
+    old_tool.path = f"tools/{new_slug}"
+    if old_tool.manifest_json:
+        old_tool.manifest_json = {**old_tool.manifest_json, "name": new_slug}
+    db.session.commit()
+
+    from app.workspace.manager import refresh_tools_md
+    refresh_tools_md(_agent)
+
+    return {
+        "renamed": True,
+        "old_slug": old_slug,
+        "new_slug": new_slug,
+        "message": f"Tool renamed from '{old_slug}' to '{new_slug}' and TOOLS.md updated.",
+    }
+
+
+def _delete_tool(_agent=None, _run_id=None, slug=None, reason=None, **kwargs):
+    if _agent is None:
+        return {"error": "No agent context"}
+    if not slug:
+        return {"error": "slug is required"}
+    if not reason:
+        return {"error": "reason is required — explain why this tool is being deleted"}
+
+    from app.extensions import db
+    from app.models.tool import Tool
+    from app.workspace.manager import get_workspace_path
+
+    tool = Tool.query.filter_by(agent_id=_agent.id, slug=slug).first()
+    if tool is None:
+        return {"error": f"Tool '{slug}' not found in this agent's workspace"}
+
+    workspace = get_workspace_path(_agent)
+    tool_dir = workspace / "tools" / slug
+
+    import shutil as _shutil
+    if tool_dir.exists():
+        _shutil.rmtree(tool_dir)
+
+    db.session.delete(tool)
+    db.session.commit()
+
+    from app.workspace.manager import refresh_tools_md
+    refresh_tools_md(_agent)
+
+    return {
+        "deleted": True,
+        "slug": slug,
+        "reason": reason,
+        "message": f"Tool '{slug}' removed from disk, DB, and TOOLS.md.",
+    }
 
 
 _FETCH_MAX_BYTES = 200_000

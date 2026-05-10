@@ -47,6 +47,10 @@
                 {% endif %}
             </td>
             <td>
+                <form method="POST" action="{{ url_for('dashboard.tool_reload', tool_id=tool.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm">Reload</button>
+                </form>
                 <form method="POST" action="{{ url_for('dashboard.tool_toggle', tool_id=tool.id) }}" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn btn-sm">{{ 'Disable' if tool.enabled else 'Enable' }}</button>

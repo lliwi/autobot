@@ -107,6 +107,14 @@ docker compose run --rm web flask codex-login
 docker compose run --rm web flask codex-logout
 docker compose run --rm web flask codex-status
 
+# Gestión de naming de tools (workspace)
+docker compose exec web python scripts/workspace_tools_manager.py --root workspaces/<agente> --no-ref-scan            # auditar
+docker compose exec web python scripts/workspace_tools_manager.py --root workspaces/<agente> --repair --no-ref-scan   # plan
+docker compose exec web python scripts/workspace_tools_manager.py --root workspaces/<agente> --repair --apply --no-ref-scan  # aplicar
+docker compose exec web flask reconcile-tools          # ver rows huérfanos en BD (dry-run)
+docker compose exec web flask reconcile-tools --apply  # eliminar rows huérfanos de BD
+docker compose exec web flask audit-tools              # auditar todos los agentes
+
 # Backup / portabilidad
 scripts/backup.sh                           # DB + workspaces (sin secretos)
 scripts/backup.sh --include-env --include-secrets  # backup completo con credenciales
@@ -548,6 +556,82 @@ Antes de generar el bundle o el PR, la tool/skill pasa por los mismos checks que
 - Smoke import en subprocess (usando el venv del workspace)
 
 Si alguno falla, la operación se cancela con el error detallado.
+
+## Gestión de naming de workspace tools
+
+Las tools de workspace deben seguir la política: **versión en `manifest.json`, nunca en el nombre del directorio**. `tools/my-tool-v2/` es inválido; usa `tools/my-tool/` con `"version": "0.2.0"`.
+
+El script `scripts/workspace_tools_manager.py` audita y repara instalaciones existentes. Los comandos Flask `flask reconcile-tools` y `flask audit-tools` permiten operar sobre la BD desde Flask context.
+
+### Auditoría
+
+```bash
+# Ver hallazgos sin tocar nada (--no-ref-scan omite escaneo de docs/skills para ir más rápido)
+docker compose exec web python scripts/workspace_tools_manager.py \
+  --root workspaces/<agente> --no-ref-scan
+
+# Salida JSON para automatización o CI
+docker compose exec web python scripts/workspace_tools_manager.py \
+  --root workspaces/<agente> --json --no-ref-scan
+
+# Auditar todos los agentes vía Flask (acceso a BD)
+docker compose exec web flask audit-tools
+docker compose exec web flask audit-tools --agent-id <id> --no-ref-scan
+```
+
+El script sale con código `2` si hay hallazgos de nivel `error` — útil como CI gate.
+
+### Reparación
+
+```bash
+# 1. Ver el plan sin aplicar nada
+docker compose exec web python scripts/workspace_tools_manager.py \
+  --root workspaces/<agente> --repair --no-ref-scan
+
+# 2. Aplicar: consolida los -vN al canonical, bump de versión, limpia referencias
+docker compose exec web python scripts/workspace_tools_manager.py \
+  --root workspaces/<agente> --repair --apply --no-ref-scan
+
+# 3. Desactivar los Tool rows en BD cuyos directorios ya no existen
+docker compose exec web flask reconcile-tools --apply
+
+# 4. Opcional: hard-delete de rows disabled
+docker compose exec web flask reconcile-tools --apply --purge
+
+# 5. Sincronizar versiones en BD con los manifests actualizados
+#    Desde el dashboard: Agents → <agente> → Tools → Sync from Workspace
+#    O desde el dashboard: Tools → <tool> → Reload
+```
+
+### Política de naming
+
+| Válido | Inválido |
+|---|---|
+| `tools/my-tool/` + `"version": "0.2.0"` | `tools/my-tool-v2/` |
+| `tools/my-tool-token/` (variante funcional) | `tools/my-tool-new/` |
+| `tools/my-tool-agentcred/` (variante de credencial) | `tools/my-tool-final/` |
+
+El backup dir `.my-tool.pre-tool-manager-backup/` se crea automáticamente durante la reparación si existe una versión canónica que necesita ser desplazada; puede eliminarse manualmente una vez verificada la migración.
+
+### Operaciones del agente sobre tools
+
+Los agentes disponen de tres built-in tools para gestionar su propio workspace sin necesitar acceso al dashboard:
+
+| Tool | Descripción |
+|---|---|
+| `create_tool` | Crea un nuevo tool (manifest.json + tool.py) |
+| `rename_tool` | Renombra un tool: mueve el directorio, actualiza manifest.name y BD, regenera TOOLS.md |
+| `delete_tool` | Elimina un tool de disco, BD y TOOLS.md permanentemente |
+
+**Uso típico para limpiar herramientas versionadas:**
+
+```text
+# El agente detecta que tiene runner2 y runner
+rename_tool(old_slug="runner2", new_slug="runner")   # ⚠ falla si runner ya existe
+delete_tool(slug="runner2", reason="Superseded by runner v0.2.0")   # eliminar el obsoleto
+```
+
+`delete_tool` requiere el parámetro `reason` para el log de auditoría. Ambas operaciones regeneran `TOOLS.md` automáticamente.
 
 ## API
 
