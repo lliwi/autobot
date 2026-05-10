@@ -49,7 +49,9 @@ SCHEMA_VERSION = 1
 
 # Files/dirs we strip out of each workspace tree — rebuilt or re-derived on
 # the target install, so no reason to bloat the bundle with them.
-_WORKSPACE_EXCLUDE_NAMES = {".venv", "runs", "__pycache__", ".pytest_cache", ".mypy_cache"}
+# .bin/ contains symlinks to host system binaries (e.g. ffmpeg) that are
+# machine-specific and must be re-installed on the target.
+_WORKSPACE_EXCLUDE_NAMES = {".venv", "runs", "__pycache__", ".pytest_cache", ".mypy_cache", ".bin"}
 
 
 @dataclass
@@ -427,6 +429,10 @@ def _restore_workspace(src: Path, dest: Path, overwrite: bool) -> None:
     We always preserve files the bundle doesn't carry (the dest might have a
     freshly-built ``.venv`` for example). Existing files are replaced only when
     ``overwrite`` is True — otherwise we keep the destination version.
+
+    Symlinks are recreated as symlinks. Dangling symlinks (target missing inside
+    the bundle — e.g. .bin/ffmpeg pointing to a host binary) are skipped with a
+    warning instead of raising FileNotFoundError.
     """
     dest.mkdir(parents=True, exist_ok=True)
     for root, dirs, files in os.walk(src):
@@ -438,7 +444,22 @@ def _restore_workspace(src: Path, dest: Path, overwrite: bool) -> None:
             dest_file = dest_root / name
             if dest_file.exists() and not overwrite:
                 continue
-            shutil.copy2(src_file, dest_file)
+            if src_file.is_symlink():
+                target = os.readlink(src_file)
+                # Skip dangling symlinks — their target is host-specific and
+                # doesn't exist inside the extracted bundle (e.g. .bin/ffmpeg).
+                resolved = (src_file.parent / target).resolve()
+                if not resolved.exists():
+                    logger.warning(
+                        "restore: skipping dangling symlink %s -> %s",
+                        src_file.relative_to(src), target,
+                    )
+                    continue
+                if dest_file.is_symlink() or dest_file.exists():
+                    dest_file.unlink()
+                os.symlink(target, dest_file)
+            else:
+                shutil.copy2(src_file, dest_file)
 
 
 def _apply_parent_links(payload: list[dict], slug_to_agent: dict[str, Agent]) -> None:
