@@ -108,8 +108,13 @@ docker compose run --rm web flask codex-logout
 docker compose run --rm web flask codex-status
 
 # Backup / portabilidad
-docker compose exec web flask export-bundle -o /tmp/autobot.tar.gz [--include-env] [--include-secrets]
-docker compose exec web flask import-bundle -i /tmp/autobot.tar.gz [--overwrite]
+scripts/backup.sh                           # DB + workspaces (sin secretos)
+scripts/backup.sh --include-env --include-secrets  # backup completo con credenciales
+
+# Restaurar
+scripts/restore.sh                          # restaura el backup más reciente
+scripts/restore.sh --list                   # lista los backups disponibles
+scripts/restore.sh backups/autobot_2026-04-20_19-13.tar.gz  # restaura uno concreto
 
 # Desarrollo
 docker compose build web                              # Rebuild tras cambios en dependencias
@@ -117,25 +122,44 @@ docker compose run --rm web pytest                    # Ejecutar tests
 docker compose run --rm web pytest tests/test_auth.py # Ejecutar un test específico
 ```
 
-### Exportar e importar una instalación
+### Backup y restauración
 
-`export-bundle` snapshotea toda la instalación (DB + filesystem) en un `tar.gz` portable:
+Los scripts `scripts/backup.sh` y `scripts/restore.sh` son la forma recomendada de hacer copias y restaurar. Escriben en `./backups/` (bind-mounted en el contenedor como `/app/backups/`), por lo que los ficheros sobreviven a reinicios del contenedor.
+
+```bash
+# Backup sin secretos (recomendado para backups rutinarios)
+scripts/backup.sh
+
+# Backup completo con credenciales y .env en claro
+scripts/backup.sh --include-env --include-secrets
+
+# Restaurar el backup más reciente
+scripts/restore.sh
+
+# Restaurar uno concreto
+scripts/restore.sh backups/autobot_2026-04-20_19-13.tar.gz
+
+# Listar backups disponibles
+scripts/restore.sh --list
+```
+
+> **⚠ Aviso:** No uses `/tmp` dentro del contenedor como destino del export — se borra al reiniciar. Los scripts usan `/app/backups/` que está bind-mounted en el host.
+
+#### Qué contiene el bundle
 
 - `manifest.json` — versión de esquema, timestamp y contadores
 - `agents.json`, `tools.json`, `skills.json`, `packages.json`, `credentials.json` — filas DB serializadas por `slug`
 - `workspaces/<slug>/` — contenido completo del workspace (excluye `.venv`, `runs/`, `__pycache__/`)
 - `.env` — opcional (`--include-env`)
 
-Las credenciales se exportan **descifradas** sólo con `--include-secrets` (el tarball no está
-cifrado, protégelo fuera). En el `import-bundle` se re-cifran con la `TOKEN_ENCRYPTION_KEY` del
-destino, así que las dos instalaciones no necesitan compartir clave.
+Las credenciales se exportan **descifradas** sólo con `--include-secrets` (el tarball no está cifrado, protégelo fuera). En el import se re-cifran con la `TOKEN_ENCRYPTION_KEY` del destino, así que las dos instalaciones no necesitan compartir clave.
 
-Conflictos en import:
+#### Comportamiento en conflictos
+
 - Sin `--overwrite`: filas y ficheros existentes se respetan (se cuentan como `skipped`).
 - Con `--overwrite`: las filas se actualizan in-place (mismo id, FKs intactas) y los ficheros del workspace se reemplazan.
 
-Los packages se importan siempre en `pending_review` (salvo los que ya estaban `rejected`) para
-que el instalador del destino los regenere en su propio venv.
+Los packages se importan siempre en `pending_review` (salvo los que ya estaban `rejected`) para que el instalador del destino los regenere en su propio venv.
 
 ## Arquitectura
 
