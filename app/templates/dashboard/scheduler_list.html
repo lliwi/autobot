@@ -30,7 +30,14 @@
             <td>{{ task.name or '—' }}</td>
             <td>{{ task.agent.name if task.agent else 'N/A' }}</td>
             <td><code>{{ task.task_type }}</code></td>
-            <td><code>{{ task.schedule_expr or '-' }}</code></td>
+            <td>
+                {% set human = describe(task.schedule_config) %}
+                {% if human %}
+                    <span title="{{ task.schedule_expr or '' }}">{{ human }}</span>
+                {% else %}
+                    <code>{{ task.schedule_expr or '-' }}</code>
+                {% endif %}
+            </td>
             <td>{{ task.timezone }}</td>
             <td><span class="badge badge-{{ 'active' if task.enabled else 'inactive' }}">{{ 'Yes' if task.enabled else 'No' }}</span></td>
             <td>{{ task.last_run_at | localtz }}</td>

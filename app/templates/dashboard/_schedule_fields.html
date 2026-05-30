@@ -1,0 +1,99 @@
+{#
+  Friendly schedule selector. Expects in context:
+    cfg          - the task's schedule_config dict (or {})
+    tz_value     - timezone string to prefill
+    legacy_expr  - existing raw cron expr (used for the advanced field)
+  Only relevant for task_type == "cron"; hidden via JS otherwise.
+#}
+{% set freq = cfg.get('freq_type') %}
+{% if not freq %}{% set freq = 'cron' if legacy_expr else 'daily' %}{% endif %}
+{% set wdays = cfg.get('weekdays') or [] %}
+{% set at_time = '%02d:%02d'|format(cfg.get('hour', 9), cfg.get('minute', 0)) %}
+
+<div id="schedule-block">
+    <div class="form-group">
+        <label for="freq_type">Frequency</label>
+        <select id="freq_type" name="freq_type">
+            <option value="minutes" {% if freq == 'minutes' %}selected{% endif %}>Every N minutes</option>
+            <option value="hourly"  {% if freq == 'hourly'  %}selected{% endif %}>Hourly</option>
+            <option value="daily"   {% if freq == 'daily'   %}selected{% endif %}>Daily</option>
+            <option value="weekly"  {% if freq == 'weekly'  %}selected{% endif %}>Weekly</option>
+            <option value="monthly" {% if freq == 'monthly' %}selected{% endif %}>Monthly</option>
+            <option value="cron"    {% if freq == 'cron'    %}selected{% endif %}>Advanced (cron)</option>
+        </select>
+    </div>
+
+    {# Every N minutes #}
+    <div class="form-group freq-fields" data-freq="minutes">
+        <label for="interval_minutes">Run every</label>
+        <div class="inline-fields">
+            <input type="number" id="interval_minutes" name="interval_minutes" min="1" max="59"
+                   value="{{ cfg.get('interval', 15) if freq == 'minutes' else 15 }}" style="max-width:6rem;">
+            <span>minutes</span>
+        </div>
+    </div>
+
+    {# Hourly #}
+    <div class="form-group freq-fields" data-freq="hourly">
+        <label for="interval_hours">Run every</label>
+        <div class="inline-fields">
+            <input type="number" id="interval_hours" name="interval_hours" min="1" max="23"
+                   value="{{ cfg.get('interval', 1) if freq == 'hourly' else 1 }}" style="max-width:6rem;">
+            <span>hour(s), at minute</span>
+            <input type="number" id="at_minute" name="at_minute" min="0" max="59"
+                   value="{{ cfg.get('minute', 0) if freq == 'hourly' else 0 }}" style="max-width:6rem;">
+        </div>
+    </div>
+
+    {# Daily #}
+    <div class="form-group freq-fields" data-freq="daily">
+        <label for="at_time_daily">Every day at</label>
+        <input type="time" id="at_time_daily" class="at-time" value="{{ at_time }}" style="max-width:9rem;">
+    </div>
+
+    {# Weekly #}
+    <div class="form-group freq-fields" data-freq="weekly">
+        <label>On these days</label>
+        <div class="weekday-picker">
+            {% set day_labels = [(1,'Mon'),(2,'Tue'),(3,'Wed'),(4,'Thu'),(5,'Fri'),(6,'Sat'),(0,'Sun')] %}
+            {% for val, lbl in day_labels %}
+            <label class="weekday-chip">
+                <input type="checkbox" name="weekdays" value="{{ val }}"
+                       {% if freq == 'weekly' and val in wdays %}checked{% endif %}>
+                <span>{{ lbl }}</span>
+            </label>
+            {% endfor %}
+        </div>
+        <label for="at_time_weekly" style="margin-top:.5rem;">at</label>
+        <input type="time" id="at_time_weekly" class="at-time" value="{{ at_time }}" style="max-width:9rem;">
+    </div>
+
+    {# Monthly #}
+    <div class="form-group freq-fields" data-freq="monthly">
+        <label for="day_of_month">On day</label>
+        <div class="inline-fields">
+            <input type="number" id="day_of_month" name="day_of_month" min="1" max="31"
+                   value="{{ cfg.get('day', 1) if freq == 'monthly' else 1 }}" style="max-width:6rem;">
+            <span>of each month, at</span>
+            <input type="time" id="at_time_monthly" class="at-time" value="{{ at_time }}" style="max-width:9rem;">
+        </div>
+    </div>
+
+    {# Advanced (raw cron) #}
+    <div class="form-group freq-fields" data-freq="cron">
+        <label for="schedule_expr">Cron Expression</label>
+        <input type="text" id="schedule_expr" name="schedule_expr"
+               value="{{ cfg.get('expr', legacy_expr) if freq == 'cron' else '' }}" placeholder="*/15 * * * *">
+        <small>Five fields: <code>min hour day-of-month month day-of-week</code>. E.g.
+            <code>*/15 * * * *</code> (every 15 min), <code>0 9 * * 1-5</code> (weekdays at 9am).</small>
+    </div>
+
+    {# Carries the chosen time into the hidden at_time field submitted to the server #}
+    <input type="hidden" id="at_time" name="at_time" value="{{ at_time }}">
+
+    <div class="form-group">
+        <label for="timezone">Timezone</label>
+        <input type="text" id="timezone" name="timezone" value="{{ tz_value }}" placeholder="UTC">
+        <small>e.g. <code>Europe/Madrid</code>, <code>UTC</code>, <code>America/New_York</code>.</small>
+    </div>
+</div>

@@ -639,8 +639,8 @@ def _read_template(filename):
     Spanish directives (Identidad de ejecución, Ética operativa, etc.) are
     preserved instead of being clobbered by hand-crafted blocks.
     """
-    from app.workspace.manager import _template_path
-    path = _template_path() / filename
+    from app.workspace.manager import get_template_path
+    path = get_template_path() / filename
     try:
         return path.read_text(encoding="utf-8")
     except OSError:

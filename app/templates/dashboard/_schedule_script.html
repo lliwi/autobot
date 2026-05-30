@@ -1,0 +1,56 @@
+<style>
+.inline-fields { display: flex; align-items: center; gap: .5rem; flex-wrap: wrap; }
+.weekday-picker { display: flex; gap: .35rem; flex-wrap: wrap; }
+.weekday-chip { display: inline-flex; align-items: center; gap: .3rem; padding: .3rem .55rem;
+    border: 1px solid var(--border, #ccc); border-radius: 6px; cursor: pointer; user-select: none; }
+.weekday-chip input { margin: 0; }
+.freq-fields { display: none; }
+.freq-fields.active { display: block; }
+</style>
+<script>
+(function () {
+    var taskType = document.getElementById('task_type');
+    var freqType = document.getElementById('freq_type');
+    var scheduleBlock = document.getElementById('schedule-block');
+    var atTimeHidden = document.getElementById('at_time');
+    if (!freqType || !scheduleBlock) return;
+
+    function visibleTimeInput() {
+        var active = scheduleBlock.querySelector('.freq-fields.active .at-time');
+        return active;
+    }
+
+    function syncHiddenTime() {
+        var inp = visibleTimeInput();
+        if (inp && inp.value) atTimeHidden.value = inp.value;
+    }
+
+    function applyFreq() {
+        var freq = freqType.value;
+        var groups = scheduleBlock.querySelectorAll('.freq-fields');
+        for (var i = 0; i < groups.length; i++) {
+            groups[i].classList.toggle('active', groups[i].getAttribute('data-freq') === freq);
+        }
+        syncHiddenTime();
+    }
+
+    function applyTaskType() {
+        var isCron = !taskType || taskType.value === 'cron';
+        scheduleBlock.style.display = isCron ? '' : 'none';
+    }
+
+    freqType.addEventListener('change', applyFreq);
+    if (taskType) taskType.addEventListener('change', applyTaskType);
+
+    // Keep the hidden at_time in sync whenever a visible time input changes.
+    scheduleBlock.addEventListener('change', function (e) {
+        if (e.target && e.target.classList.contains('at-time')) syncHiddenTime();
+    });
+    // Final sync on submit so the server always gets the chosen time.
+    var form = scheduleBlock.closest('form');
+    if (form) form.addEventListener('submit', syncHiddenTime);
+
+    applyFreq();
+    applyTaskType();
+})();
+</script>

@@ -10,7 +10,11 @@ class ScheduledTask(db.Model):
     agent_id = db.Column(db.Integer, db.ForeignKey("agents.id"), nullable=False, index=True)
     name = db.Column(db.String(255), nullable=True)
     task_type = db.Column(db.String(50), nullable=False)  # cron, heartbeat, one_shot
-    schedule_expr = db.Column(db.String(100), nullable=True)  # cron expression
+    schedule_expr = db.Column(db.String(100), nullable=True)  # cron expression (derived)
+    # Friendly schedule builder state (freq_type + params). The cron expression
+    # in schedule_expr is derived from this; we keep the config so the edit form
+    # can repopulate the selectors without lossy cron parsing.
+    schedule_config = db.Column(db.JSON, nullable=True)
     timezone = db.Column(db.String(50), nullable=False, default="UTC")
     payload_json = db.Column(db.JSON, nullable=True)
     enabled = db.Column(db.Boolean, nullable=False, default=True)
@@ -36,6 +40,7 @@ class ScheduledTask(db.Model):
             "name": self.name,
             "task_type": self.task_type,
             "schedule_expr": self.schedule_expr,
+            "schedule_config": self.schedule_config,
             "timezone": self.timezone,
             "payload_json": self.payload_json,
             "enabled": self.enabled,

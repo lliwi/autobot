@@ -30,18 +30,22 @@ def create_scheduled_task():
     if data["task_type"] not in ("cron", "heartbeat", "one_shot"):
         return jsonify(error="Invalid task_type"), 400
 
-    if data["task_type"] == "cron" and not data.get("schedule_expr"):
-        return jsonify(error="schedule_expr required for cron tasks"), 400
+    if data["task_type"] == "cron" and not data.get("schedule_expr") and not data.get("schedule_config"):
+        return jsonify(error="schedule_expr or schedule_config required for cron tasks"), 400
 
-    task = create_task(
-        agent_id=data["agent_id"],
-        task_type=data["task_type"],
-        schedule_expr=data.get("schedule_expr"),
-        timezone_str=data.get("timezone", "UTC"),
-        payload_json=data.get("payload_json"),
-        enabled=data.get("enabled", True),
-        max_retries=data.get("max_retries", 3),
-    )
+    try:
+        task = create_task(
+            agent_id=data["agent_id"],
+            task_type=data["task_type"],
+            schedule_expr=data.get("schedule_expr"),
+            schedule_config=data.get("schedule_config"),
+            timezone_str=data.get("timezone", "UTC"),
+            payload_json=data.get("payload_json"),
+            enabled=data.get("enabled", True),
+            max_retries=data.get("max_retries", 3),
+        )
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
     return jsonify(task.to_dict()), 201
 
 
@@ -61,12 +65,15 @@ def update_scheduled_task(task_id):
     if not data:
         return jsonify(error="No data provided"), 400
 
-    allowed = {"schedule_expr", "timezone", "payload_json", "enabled", "max_retries"}
+    # Note: the model attribute is ``timezone``; update_task does a generic
+    # setattr, so we pass the key through unchanged.
+    allowed = {"schedule_expr", "schedule_config", "timezone", "payload_json", "enabled", "max_retries"}
     updates = {k: v for k, v in data.items() if k in allowed}
-    if "timezone" in updates:
-        updates["timezone_str"] = updates.pop("timezone")
 
-    task = update_task(task_id, **updates)
+    try:
+        task = update_task(task_id, **updates)
+    except ValueError as e:
+        return jsonify(error=str(e)), 400
     if task is None:
         return jsonify(error="Task not found"), 404
     return jsonify(task.to_dict())

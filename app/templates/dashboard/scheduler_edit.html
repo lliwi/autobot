@@ -26,20 +26,17 @@
     <div class="form-group">
         <label for="task_type">Task Type</label>
         <select id="task_type" name="task_type" required>
-            <option value="cron" {% if task.task_type == 'cron' %}selected{% endif %}>Cron</option>
+            <option value="cron" {% if task.task_type == 'cron' %}selected{% endif %}>Scheduled (recurring)</option>
             <option value="heartbeat" {% if task.task_type == 'heartbeat' %}selected{% endif %}>Heartbeat</option>
             <option value="one_shot" {% if task.task_type == 'one_shot' %}selected{% endif %}>One Shot</option>
         </select>
     </div>
-    <div class="form-group">
-        <label for="schedule_expr">Cron Expression</label>
-        <input type="text" id="schedule_expr" name="schedule_expr" value="{{ task.schedule_expr or '' }}" placeholder="*/15 * * * *">
-        <small>Required for cron tasks. E.g. <code>*/15 * * * *</code> (every 15 min), <code>0 9 * * 1-5</code> (weekdays at 9am)</small>
-    </div>
-    <div class="form-group">
-        <label for="timezone">Timezone</label>
-        <input type="text" id="timezone" name="timezone" value="{{ task.timezone }}" placeholder="UTC">
-    </div>
+
+    {% set cfg = task.schedule_config or {} %}
+    {% set tz_value = task.timezone %}
+    {% set legacy_expr = task.schedule_expr or '' %}
+    {% include "dashboard/_schedule_fields.html" %}
+
     <div class="form-group">
         <label for="payload_message">Payload Message</label>
         <textarea id="payload_message" name="payload_message" rows="3" placeholder="Message to send to the agent...">{{ (task.payload_json or {}).get('message', '') }}</textarea>
@@ -53,4 +50,6 @@
         <a href="{{ url_for('dashboard.scheduler_list') }}" class="btn">Cancel</a>
     </div>
 </form>
+
+{% include "dashboard/_schedule_script.html" %}
 {% endblock %}

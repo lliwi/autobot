@@ -5,14 +5,20 @@ from croniter import croniter
 
 from app.extensions import db
 from app.models.scheduled_task import ScheduledTask
+from app.services import schedule_builder
 
 
-def create_task(agent_id, task_type, schedule_expr=None, timezone_str="UTC", payload_json=None, enabled=True, max_retries=3, name=None):
+def create_task(agent_id, task_type, schedule_expr=None, timezone_str="UTC", payload_json=None, enabled=True, max_retries=3, name=None, schedule_config=None):
+    # When the friendly selector provides a schedule_config, derive the cron
+    # expression from it; the config is stored for lossless edit round-trips.
+    if schedule_config:
+        schedule_expr = schedule_builder.build_cron(schedule_config)
     task = ScheduledTask(
         agent_id=agent_id,
         name=(name or "").strip() or None,
         task_type=task_type,
         schedule_expr=schedule_expr,
+        schedule_config=schedule_config,
         timezone=timezone_str,
         payload_json=payload_json,
         enabled=enabled,
@@ -31,10 +37,13 @@ def update_task(task_id, **kwargs):
         return None
     if "name" in kwargs:
         kwargs["name"] = (kwargs["name"] or "").strip() or None
+    # Derive the cron expression from a friendly schedule_config when present.
+    if kwargs.get("schedule_config"):
+        kwargs["schedule_expr"] = schedule_builder.build_cron(kwargs["schedule_config"])
     for key, value in kwargs.items():
         if hasattr(task, key):
             setattr(task, key, value)
-    if ("schedule_expr" in kwargs or "timezone" in kwargs) and task.task_type == "cron":
+    if ("schedule_expr" in kwargs or "schedule_config" in kwargs or "timezone" in kwargs) and task.task_type == "cron":
         task.next_run_at = compute_next_run(task.schedule_expr, tz_name=task.timezone)
     db.session.commit()
     return task
