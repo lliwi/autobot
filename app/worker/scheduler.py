@@ -224,6 +224,11 @@ def _execute_cron_task(app, task_id):
                 channel_type="internal",
                 trigger_type="cron",
             )
+            # Link the run to this task so the execution log can trace scheduler
+            # history back to the task (used by /logs and the agent's list_runs).
+            from app.services.run_log_service import link_run_to_task
+
+            link_run_to_task(result.get("run_id"), task_id)
             if result.get("error"):
                 logger.warning(f"Cron task {task_id} error: {result['error']}")
                 mark_task_failed(task_id)

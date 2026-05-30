@@ -1,0 +1,70 @@
+{% if detail %}
+{% set r = detail.run %}
+<div class="run-detail">
+    <h2>
+        Run #{{ r.id }}
+        <span class="status-badge status-{{ r.status }}">{{ r.status }}</span>
+    </h2>
+    <div class="meta">
+        <code>{{ r.trigger_type }}</code>
+        {% if r.scheduled_task_id %}· task {{ r.scheduled_task_name or r.scheduled_task_id }} (#{{ r.scheduled_task_id }}){% endif %}
+        · started {{ r.started_at }}
+        {% if r.duration_ms is not none %}· {{ '%.1f'|format(r.duration_ms / 1000) }}s{% endif %}
+        {% if r.input_tokens or r.output_tokens %}· {{ r.input_tokens or 0 }}/{{ r.output_tokens or 0 }} tok{% endif %}
+        · <a href="{{ url_for('dashboard.logs', tab='runs', status=status, trigger_type=trigger_type, agent_id=agent_id, limit=limit) }}">close</a>
+    </div>
+    {% if r.error_summary %}
+    <div class="error-box">{{ r.error_summary }}</div>
+    {% endif %}
+
+    {% if detail.tool_executions %}
+    <h2 style="margin-top:0.75rem;">Tool calls ({{ detail.tool_executions | length }})</h2>
+    {% for e in detail.tool_executions %}
+    <div>
+        <strong>{{ e.tool_name }}</strong>
+        <span class="status-badge status-{{ 'error' if e.status == 'error' else 'completed' }}">{{ e.status }}</span>
+        {% if e.input %}<pre>in: {{ e.input }}</pre>{% endif %}
+        {% if e.output %}<pre>out: {{ e.output }}</pre>{% endif %}
+    </div>
+    {% endfor %}
+    {% else %}
+    <p class="logs-count">No tool calls recorded for this run.</p>
+    {% endif %}
+</div>
+{% endif %}
+
+<p class="logs-count">{{ runs | length }} run(s)</p>
+
+{% if runs %}
+<table class="logs-table">
+    <thead>
+        <tr>
+            <th style="width:4rem;">ID</th>
+            <th style="width:9rem;">Agent</th>
+            <th style="width:7rem;">Trigger</th>
+            <th style="width:6rem;">Status</th>
+            <th style="width:5rem;">Duration</th>
+            <th style="width:12rem;">Started</th>
+            <th>Error</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for run in runs %}
+        <tr>
+            <td><a href="{{ url_for('dashboard.logs', tab='runs', run_id=run.id, status=status, trigger_type=trigger_type, agent_id=agent_id, limit=limit) }}">#{{ run.id }}</a></td>
+            <td>{{ run.agent.name if run.agent else run.agent_id }}</td>
+            <td>
+                <code>{{ run.trigger_type }}</code>
+                {% if run.scheduled_task_id %}<br><small>task #{{ run.scheduled_task_id }}</small>{% endif %}
+            </td>
+            <td><span class="status-badge status-{{ run.status }}">{{ run.status }}</span></td>
+            <td>{% if run.duration_ms is not none %}{{ '%.1f'|format(run.duration_ms / 1000) }}s{% else %}—{% endif %}</td>
+            <td class="time">{{ run.started_at | localtz }}</td>
+            <td class="msg">{{ (run.error_summary or '')[:200] }}</td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<div class="logs-empty">No runs match the current filters.</div>
+{% endif %}

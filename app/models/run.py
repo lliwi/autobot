@@ -10,6 +10,9 @@ class Run(db.Model):
     agent_id = db.Column(db.Integer, db.ForeignKey("agents.id"), nullable=False, index=True)
     session_id = db.Column(db.Integer, db.ForeignKey("sessions.id"), nullable=True)
     parent_run_id = db.Column(db.Integer, db.ForeignKey("runs.id"), nullable=True, index=True)
+    # Set when a cron ScheduledTask drives this run, so the scheduler's execution
+    # history can be traced back to the task that triggered it.
+    scheduled_task_id = db.Column(db.Integer, db.ForeignKey("scheduled_tasks.id"), nullable=True, index=True)
     trigger_type = db.Column(db.String(50), nullable=False)  # message, cron, heartbeat, internal, delegation
     status = db.Column(db.String(50), nullable=False, default="pending")
     started_at = db.Column(db.DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
@@ -23,6 +26,7 @@ class Run(db.Model):
     # Relationships
     parent_run = db.relationship("Run", remote_side=[id], backref="child_runs")
     tool_executions = db.relationship("ToolExecution", backref="run", lazy="dynamic")
+    scheduled_task = db.relationship("ScheduledTask", backref="runs")
 
     def to_dict(self):
         return {
@@ -30,6 +34,7 @@ class Run(db.Model):
             "agent_id": self.agent_id,
             "session_id": self.session_id,
             "parent_run_id": self.parent_run_id,
+            "scheduled_task_id": self.scheduled_task_id,
             "trigger_type": self.trigger_type,
             "status": self.status,
             "started_at": self.started_at.isoformat() if self.started_at else None,

@@ -12,6 +12,11 @@ PROCESSES = ["", "web", "worker"]
 DEFAULT_LIMIT = 200
 MAX_LIMIT = 2000
 
+# Execution-log ("Executions" tab) filter vocabularies.
+RUN_STATUSES = ["running", "completed", "error"]
+RUN_TRIGGERS = ["message", "cron", "heartbeat", "delegation", "internal", "auto_review", "patch_review"]
+RUNS_DEFAULT_LIMIT = 50
+
 
 def _redis_client():
     url = current_app.config.get("REDIS_URL") or os.environ.get("REDIS_URL", "")
@@ -67,6 +72,10 @@ def _apply_filters(entries, level, process, logger_q, message_q):
 @dashboard_bp.route("/logs")
 @login_required
 def logs():
+    tab = request.args.get("tab", "app")
+    if tab == "runs":
+        return _logs_runs_tab()
+
     try:
         limit = int(request.args.get("limit", DEFAULT_LIMIT))
     except (TypeError, ValueError):
@@ -92,6 +101,7 @@ def logs():
     template = "dashboard/_logs_table.html" if partial else "dashboard/logs.html"
     return render_template(
         template,
+        tab="app",
         entries=entries,
         error=error,
         level=level,
@@ -102,4 +112,58 @@ def logs():
         levels=LEVELS,
         processes=PROCESSES,
         ring_max=REDIS_LOG_MAX,
+    )
+
+
+def _logs_runs_tab():
+    """Render the 'Executions' tab — the agent run log (runs + tool_executions)."""
+    from app.models.agent import Agent
+    from app.services import run_log_service
+
+    status = request.args.get("status", "")
+    if status not in RUN_STATUSES:
+        status = ""
+    trigger_type = request.args.get("trigger_type", "")
+    if trigger_type not in RUN_TRIGGERS:
+        trigger_type = ""
+    agent_id = request.args.get("agent_id", type=int)
+    run_id = request.args.get("run_id", type=int)
+
+    try:
+        limit = int(request.args.get("limit", RUNS_DEFAULT_LIMIT))
+    except (TypeError, ValueError):
+        limit = RUNS_DEFAULT_LIMIT
+    limit = max(1, min(limit, run_log_service.MAX_LIMIT))
+
+    # Dashboard is a human/admin view → system-wide scope, optionally narrowed to
+    # one agent via the filter.
+    runs = run_log_service.recent_runs(
+        agent_id=agent_id,
+        status=status or None,
+        trigger_type=trigger_type or None,
+        scope="own" if agent_id else "all",
+        limit=limit,
+    )
+
+    detail = run_log_service.run_detail(run_id, scope="all") if run_id else None
+    if detail and detail.get("error"):
+        detail = None
+
+    agents = Agent.query.order_by(Agent.name).all()
+
+    partial = request.args.get("partial") == "1"
+    template = "dashboard/_runs_table.html" if partial else "dashboard/logs.html"
+    return render_template(
+        template,
+        tab="runs",
+        runs=runs,
+        detail=detail,
+        run_id=run_id,
+        agents=agents,
+        agent_id=agent_id,
+        status=status,
+        trigger_type=trigger_type,
+        limit=limit,
+        run_statuses=RUN_STATUSES,
+        run_triggers=RUN_TRIGGERS,
     )
