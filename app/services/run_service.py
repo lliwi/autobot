@@ -1,7 +1,29 @@
 from datetime import datetime, timezone
 
+from flask import current_app
+
 from app.extensions import db
 from app.models.run import Run
+
+
+def estimate_cost(model_name, input_tokens, output_tokens):
+    """Estimate run cost in USD from token counts and the model's price table.
+
+    Prices live in ``Config.MODEL_PRICING`` (USD per 1,000 tokens). The model is
+    matched by the longest key that is a substring of ``model_name``; otherwise
+    the ``"default"`` entry is used.
+    """
+    if not input_tokens and not output_tokens:
+        return None
+    pricing = current_app.config.get("MODEL_PRICING", {})
+    rate = pricing.get("default", (0.0, 0.0))
+    name = (model_name or "").lower()
+    for key in sorted((k for k in pricing if k != "default"), key=len, reverse=True):
+        if key.lower() in name:
+            rate = pricing[key]
+            break
+    in_rate, out_rate = rate
+    return ((input_tokens or 0) * in_rate + (output_tokens or 0) * out_rate) / 1000
 
 
 def create_run(agent_id, session_id, trigger_type="message"):
@@ -32,9 +54,9 @@ def finish_run(run_id, status="completed", input_tokens=None, output_tokens=None
         finished = run.finished_at.replace(tzinfo=None) if run.finished_at.tzinfo else run.finished_at
         run.duration_ms = int((finished - started).total_seconds() * 1000)
 
-    # Estimate cost (rough, for o4-mini)
-    if input_tokens and output_tokens:
-        run.estimated_cost = (input_tokens * 0.00015 + output_tokens * 0.0006) / 1000
+    # Estimate cost from the agent's model price table (see estimate_cost).
+    model_name = run.agent.model_name if run.agent is not None else None
+    run.estimated_cost = estimate_cost(model_name, input_tokens, output_tokens)
 
     db.session.commit()
 

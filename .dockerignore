@@ -1,0 +1,53 @@
+# Keep the Docker build context small. At runtime docker-compose mounts the
+# project at /app via a volume, so almost nothing here needs to be baked into
+# the image — only the dependency manifest and source code matter for the build.
+
+# Version control / tooling
+.git
+.gitignore
+.github
+.claude
+*.md
+!README.md
+
+# Python caches / build artifacts
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtualenvs
+.venv/
+venv/
+
+# Secrets / local config (provided via env_file at runtime, never in the image)
+.env
+*.db
+*.sqlite
+*.sqlite3
+
+# Agent workspaces are large (GBs) and mounted at runtime; keep only the
+# golden templates needed to scaffold new agents.
+workspaces/
+!workspaces/_template/
+!workspaces/_global/
+
+# Stray 289 MB nested project copy — never belongs in the build context.
+autobot/
+
+# Backups, dumps, large local data
+backups/
+kali/wordlists/
+*.tar.gz
+
+# Editor / OS noise
+.idea/
+.vscode/
+*.swp
+.DS_Store

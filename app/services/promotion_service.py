@@ -578,7 +578,7 @@ def _resolve_gh_token() -> str | None:
         if value:
             return value
     except Exception:
-        pass
+        logger.debug("gh_token credential lookup failed; falling back to env", exc_info=True)
     return os.environ.get("GH_TOKEN") or os.environ.get("GITHUB_TOKEN") or None
 
 

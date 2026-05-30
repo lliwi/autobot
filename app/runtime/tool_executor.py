@@ -30,7 +30,7 @@ def execute(run_id, agent, tool_name, arguments):
     try:
         result = tool_def.handler(_agent=agent, _run_id=run_id, **arguments)
         execution.output_json = result
-        execution.status = "success" if not (isinstance(result, dict) and result.get("error")) else "error"
+        execution.status = "error" if isinstance(result, dict) and result.get("error") else "completed"
     except Exception as e:
         current_app.logger.error(f"Tool execution error: {tool_name}: {e}")
         execution.output_json = {"error": str(e)}
@@ -75,7 +75,7 @@ def _execute_workspace_tool(run_id, agent, tool_name, arguments):
     try:
         result = _run_in_venv(agent, tool, tool_py, arguments)
         execution.output_json = result
-        execution.status = "success" if not (isinstance(result, dict) and result.get("error")) else "error"
+        execution.status = "error" if isinstance(result, dict) and result.get("error") else "completed"
     except Exception as e:
         current_app.logger.exception("Workspace tool crashed: %s", tool_name)
         execution.output_json = {"error": str(e)}

@@ -17,6 +17,9 @@ htmlcov/
 workspaces/
 !workspaces/_template/
 
+# Stray nested project copy (289 MB, has its own .git) — never commit it.
+autobot/
+
 *.pyc
 .venv/
 venv/

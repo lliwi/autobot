@@ -1,8 +1,37 @@
+import json
 import os
 
 from dotenv import load_dotenv
 
 load_dotenv()
+
+# USD per 1,000 tokens as ``(input, output)``, keyed by a model-name substring;
+# the longest matching key wins, so "gpt-5.4-mini" beats "gpt-5.4" beats "gpt-5".
+# These mirror the Codex models exposed by ``codex_auth.list_models()``. Codex is
+# billed via subscription, so the figures are estimates for metrics/budgets —
+# tune them per deployment with the ``MODEL_PRICING_JSON`` env var.
+_DEFAULT_MODEL_PRICING = {
+    "gpt-5.5": (0.00125, 0.01000),
+    "gpt-5.4-mini": (0.00015, 0.00060),
+    "gpt-5.4": (0.00125, 0.01000),
+    "gpt-5.3-codex": (0.00125, 0.01000),
+    "gpt-5.2": (0.00125, 0.01000),
+    "gpt-5": (0.00125, 0.01000),  # generic fallback for any other gpt-5.x
+    "mini": (0.00015, 0.00060),   # generic fallback for any *-mini variant
+    "o4-mini": (0.00015, 0.00060),
+    "default": (0.00125, 0.01000),
+}
+
+
+def _load_model_pricing():
+    raw = os.environ.get("MODEL_PRICING_JSON")
+    if not raw:
+        return dict(_DEFAULT_MODEL_PRICING)
+    try:
+        parsed = json.loads(raw)
+        return {k: tuple(v) for k, v in parsed.items()}
+    except (ValueError, TypeError):
+        return dict(_DEFAULT_MODEL_PRICING)
 
 
 class Config:
@@ -37,6 +66,13 @@ class Config:
     # model keeps calling tools without converging. Individual agents can
     # override this via the ``max_tool_rounds`` column.
     MAX_TOOL_ROUNDS = int(os.environ.get("MAX_TOOL_ROUNDS", "20"))
+
+    # Model pricing in USD per 1,000 tokens as ``(input, output)`` tuples, keyed
+    # by a substring of the model name (longest key wins). Used to estimate
+    # ``Run.estimated_cost`` for metrics and daily cost budgets. Override the
+    # whole table with the ``MODEL_PRICING_JSON`` env var, e.g.
+    # '{"gpt-5.2": [0.00125, 0.01], "default": [0.00015, 0.0006]}'.
+    MODEL_PRICING = _load_model_pricing()
 
     # Self-improvement rate limit. Caps how many patches a single agent can
     # produce per rolling hour, counting only states that consume budget

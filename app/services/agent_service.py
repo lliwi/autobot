@@ -1,3 +1,4 @@
+import logging
 import re
 import shutil
 from pathlib import Path
@@ -6,6 +7,8 @@ from flask import current_app
 
 from app.extensions import db
 from app.models.agent import Agent
+
+logger = logging.getLogger(__name__)
 
 
 def _slugify(name):
@@ -131,7 +134,10 @@ def _sync_agents_md_on_reparent(agent, old_parent_id):
             try:
                 _register_in_agents_md(new_parent, agent, role="")
             except Exception:
-                pass
+                logger.debug(
+                    "Failed to register agent %s in parent %s AGENTS.md (non-fatal)",
+                    agent.id, new_parent.id, exc_info=True,
+                )
 
 
 def _descendant_ids(agent):

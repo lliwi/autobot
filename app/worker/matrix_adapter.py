@@ -2,6 +2,7 @@ import asyncio
 import logging
 import threading
 import time
+from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -324,7 +325,7 @@ class MatrixBot:
                     "user_id": self.app.config.get("MATRIX_USER_ID", ""),
                     "homeserver": self.app.config.get("MATRIX_HOMESERVER", ""),
                     "rooms": rooms,
-                    "last_seen": __import__("datetime").datetime.utcnow().isoformat() + "Z",
+                    "last_seen": datetime.now(timezone.utc).isoformat(),
                 }
                 import redis as _redis
                 r = _redis.Redis.from_url(

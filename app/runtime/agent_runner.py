@@ -204,7 +204,6 @@ def run(agent, session, user_message, run_id):
                 ],
             })
 
-            abort_after_round = False
             for tc in tool_calls:
                 tool_name = tc["function"]["name"]
                 try:
@@ -218,7 +217,6 @@ def run(agent, session, user_message, run_id):
                 yield json.dumps({"type": "tool_call", "data": {"name": tool_name, "arguments": arguments}})
 
                 if repeat_signatures[signature] >= 3:
-                    abort_after_round = True
                     yield json.dumps({
                         "type": "error",
                         "data": (
@@ -240,9 +238,6 @@ def run(agent, session, user_message, run_id):
                     "tool_call_id": tc["id"],
                     "content": _cap_tool_result_content(result),
                 })
-
-            if abort_after_round:
-                return
 
         # Hit max rounds
         yield json.dumps({"type": "error", "data": "Maximum tool call rounds reached"})
