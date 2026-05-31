@@ -89,6 +89,30 @@ def list_credentials_for_subprocess(agent_id: int) -> dict[str, str]:
     return result
 
 
+def usernames_for_subprocess(agent_id: int) -> dict[str, str]:
+    """Return name→username for the agent's ``user_password`` credentials.
+
+    The encrypted value carries only the password, so subprocess wrappers can't
+    reconstruct a user_password credential from ``AUTOBOT_CRED_<NAME>`` alone.
+    The tool executor injects these as ``AUTOBOT_CRED_<NAME>_USERNAME`` so SMB-
+    style wrappers resolve fully without DB access. Agent-scoped values shadow
+    globals with the same name.
+    """
+    rows = (
+        Credential.query
+        .filter(
+            db.or_(Credential.agent_id == agent_id, Credential.agent_id.is_(None))
+        )
+        .order_by(Credential.agent_id.asc().nullsfirst())  # globals first, scoped win
+        .all()
+    )
+    result: dict[str, str] = {}
+    for row in rows:
+        if row.credential_type == "user_password" and row.username:
+            result[row.name] = row.username
+    return result
+
+
 def list_credentials(agent_id: int | None = None) -> list[Credential]:
     """Return credentials, optionally scoped to a specific agent.
 

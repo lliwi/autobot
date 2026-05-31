@@ -165,10 +165,16 @@ def _inject_credentials(agent, env: dict) -> None:
     ``os.environ.get("AUTOBOT_CRED_<NAME>")`` directly — no DB access needed.
     """
     try:
-        from app.services.credential_service import list_credentials_for_subprocess
+        from app.services.credential_service import (
+            list_credentials_for_subprocess,
+            usernames_for_subprocess,
+        )
         creds = list_credentials_for_subprocess(agent.id)
         for name, value in creds.items():
-            env_key = f"AUTOBOT_CRED_{name.upper()}"
-            env[env_key] = value
+            env[f"AUTOBOT_CRED_{name.upper()}"] = value
+        # user_password credentials also export their username so subprocess
+        # wrappers can reconstruct the full pair without DB access.
+        for name, username in usernames_for_subprocess(agent.id).items():
+            env[f"AUTOBOT_CRED_{name.upper()}_USERNAME"] = username
     except Exception:
         logger.exception("Failed to inject credentials for agent %s", agent.id)
