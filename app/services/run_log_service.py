@@ -17,6 +17,7 @@ import json
 from app.extensions import db
 from app.models.run import Run
 from app.models.tool_execution import ToolExecution
+from app.utils.timefmt import utc_iso
 
 MAX_LIMIT = 50
 _OUTPUT_PREVIEW = 2000  # chars; tool_execution outputs can be large
@@ -85,8 +86,8 @@ def summarize_run(run):
         "agent_id": run.agent_id,
         "trigger_type": run.trigger_type,
         "status": run.status,
-        "started_at": run.started_at.isoformat() if run.started_at else None,
-        "finished_at": run.finished_at.isoformat() if run.finished_at else None,
+        "started_at": utc_iso(run.started_at),
+        "finished_at": utc_iso(run.finished_at),
         "duration_ms": run.duration_ms,
         "input_tokens": run.input_tokens,
         "output_tokens": run.output_tokens,
@@ -102,8 +103,8 @@ def summarize_execution(execution):
         "id": execution.id,
         "tool_name": execution.tool_name,
         "status": execution.status,
-        "started_at": execution.started_at.isoformat() if execution.started_at else None,
-        "finished_at": execution.finished_at.isoformat() if execution.finished_at else None,
+        "started_at": utc_iso(execution.started_at),
+        "finished_at": utc_iso(execution.finished_at),
         "input": _preview(execution.input_json),
         "output": _preview(execution.output_json),
     }

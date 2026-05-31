@@ -53,7 +53,15 @@ def toggle_task(task_id):
     task = db.session.get(ScheduledTask, task_id)
     if task is None:
         return None
-    task.enabled = not task.enabled
+    return set_task_enabled(task_id, not task.enabled)
+
+
+def set_task_enabled(task_id, enabled):
+    """Enable or disable a task idempotently. Recomputes next_run_at on enable."""
+    task = db.session.get(ScheduledTask, task_id)
+    if task is None:
+        return None
+    task.enabled = bool(enabled)
     if task.enabled and task.schedule_expr and task.task_type == "cron":
         task.next_run_at = compute_next_run(task.schedule_expr, tz_name=task.timezone)
     db.session.commit()

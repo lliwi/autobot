@@ -72,6 +72,14 @@ class TestRecentRuns:
             ids = [r.id for r in runs]
             assert ids == sorted(ids, reverse=True)
 
+    def test_summary_timestamps_are_explicit_utc(self, app, agents):
+        a1, a2 = agents
+        with app.app_context():
+            run = run_log_service.recent_runs(agent_id=a1, scope="own")[0]
+            summary = run_log_service.summarize_run(run)
+            # Must be unambiguous UTC so the agent doesn't read it as local time.
+            assert summary["started_at"].endswith("Z")
+
     def test_limit_capped(self, app, agents):
         a1, a2 = agents
         with app.app_context():
