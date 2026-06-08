@@ -8,6 +8,12 @@ from apscheduler.triggers.interval import IntervalTrigger
 logger = logging.getLogger(__name__)
 
 _scheduler = None
+# Tracks the trigger "signature" (schedule + timezone, or heartbeat interval) of
+# each managed job so _sync_jobs only reschedules a job when its schedule
+# actually changed. Rescheduling on every 30s sync would reset the job's
+# next_run_time and could silently drop a run that was due in that instant —
+# the root cause of weekly tasks being skipped.
+_job_signatures: dict[str, str] = {}
 
 
 def init_scheduler(app):
@@ -73,6 +79,7 @@ def _sync_jobs(app):
                     func=_execute_heartbeat,
                     trigger=IntervalTrigger(minutes=agent.heartbeat_interval),
                     kwargs={"app": app, "agent_id": agent.id},
+                    signature=f"heartbeat:{agent.heartbeat_interval}",
                 )
 
         # Sync cron tasks
@@ -100,18 +107,32 @@ def _sync_jobs(app):
                         func=_execute_cron_task,
                         trigger=trigger,
                         kwargs={"app": app, "task_id": task.id},
+                        signature=f"cron:{task.schedule_expr}:{tz_name}",
                     )
-                    # Keep DB next_run_at aligned with the trigger's next fire
-                    # time. Use the trigger directly rather than job.next_run_time
-                    # because the latter is only populated after the scheduler
-                    # starts, and _sync_jobs runs during init too.
-                    now = _dt.now(ZoneInfo(tz_name) if tz_name != "UTC" else _tz.utc)
-                    next_fire = trigger.get_next_fire_time(None, now)
+                    # Keep DB next_run_at aligned with the job's *actual* next
+                    # fire time once the scheduler is running. Falling back to a
+                    # fresh trigger computation only during init (before the job
+                    # has a next_run_time), so we never overwrite the real
+                    # pending fire with a recomputed-from-now value.
+                    job = _scheduler.get_job(job_id)
+                    next_fire = getattr(job, "next_run_time", None) if job else None
+                    if next_fire is None:
+                        now = _dt.now(ZoneInfo(tz_name) if tz_name != "UTC" else _tz.utc)
+                        next_fire = trigger.get_next_fire_time(None, now)
                     if next_fire is not None:
                         new_next = next_fire.astimezone(_tz.utc).replace(tzinfo=None)
                         if task.next_run_at != new_next:
                             task.next_run_at = new_next
                             db.session.commit()
+                    # Health check: an enabled task whose next fire is already far
+                    # in the past means the job never advanced — surface it.
+                    if task.next_run_at is not None:
+                        behind = (_dt.now(_tz.utc).replace(tzinfo=None) - task.next_run_at).total_seconds()
+                        if behind > 3600:
+                            logger.warning(
+                                "Scheduled task %s (%r) is stale: next_run_at %s is %.0fs in the past",
+                                task.id, task.schedule_expr, task.next_run_at, behind,
+                            )
                 except ValueError as e:
                     logger.error(f"Invalid cron expression for task {task.id}: {e}")
 
@@ -121,22 +142,32 @@ def _sync_jobs(app):
             if job.id not in expected_ids:
                 logger.info(f"Removing stale job: {job.id}")
                 job.remove()
+                _job_signatures.pop(job.id, None)
 
 
-def _ensure_job(job_id, func, trigger, kwargs):
-    """Add or update a job in the scheduler."""
+def _ensure_job(job_id, func, trigger, kwargs, signature):
+    """Add a job, or reschedule it only when its trigger actually changed.
+
+    Critically, an existing job whose ``signature`` is unchanged is left alone:
+    calling ``reschedule`` on every sync would reset ``next_run_time`` and could
+    drop a run that was due at that instant (this is what silently skipped
+    weekly tasks). We only reschedule when the schedule/timezone changed.
+    """
     existing = _scheduler.get_job(job_id)
     if existing:
-        existing.reschedule(trigger)
-    else:
-        _scheduler.add_job(
-            func,
-            trigger=trigger,
-            id=job_id,
-            replace_existing=True,
-            kwargs=kwargs,
-            misfire_grace_time=300,
-        )
+        if _job_signatures.get(job_id) != signature:
+            existing.reschedule(trigger)
+            _job_signatures[job_id] = signature
+        return
+    _scheduler.add_job(
+        func,
+        trigger=trigger,
+        id=job_id,
+        replace_existing=True,
+        kwargs=kwargs,
+        misfire_grace_time=300,
+    )
+    _job_signatures[job_id] = signature
 
 
 def _execute_heartbeat(app, agent_id):

@@ -56,12 +56,22 @@ def load_token() -> OAuthToken | None:
         return None
 
 
+# Serializes token refresh so concurrent callers (e.g. several cron tasks firing
+# at the same minute in the worker thread pool) don't each trigger a refresh.
+# OAuth refresh-token rotation means a second concurrent refresh reuses an
+# already-rotated token and fails with 401 "refresh_token_reused", which would
+# then cascade to unrelated tasks. With the lock, the first caller refreshes and
+# the rest see the freshly-stored, still-valid token and skip the refresh.
+_refresh_lock = threading.Lock()
+
+
 def get_access_token() -> str:
     """Return a valid access token, refreshing it on disk if needed.
 
     Raises if not logged in.
     """
-    token = get_token(provider=OPENAI_CODEX_PROVIDER, storage=_storage())
+    with _refresh_lock:
+        token = get_token(provider=OPENAI_CODEX_PROVIDER, storage=_storage())
     return token.access
 
 
