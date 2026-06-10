@@ -11,6 +11,25 @@ from app.services.run_service import create_run, finish_run
 from app.services.session_service import add_message, get_or_create_session
 
 
+def _resolve_outcome(error, meta):
+    """Map runner chunks to a persisted (status, error_summary) pair.
+
+    A run that hit the tool-round cap (#25) still produced a partial answer, so
+    it is recorded as ``partial`` with a structured note rather than ``error``.
+    """
+    if error:
+        return "error", error
+    if meta and meta.get("termination_reason") == "max_tool_rounds":
+        note = (
+            "Reached max tool-call rounds "
+            f"({meta.get('tool_round_limit')}); returned a partial summary. "
+            f"tool_executions={meta.get('tool_executions_count')} "
+            f"last_tool={meta.get('last_tool_name')}/{meta.get('last_tool_status')}"
+        )
+        return "partial", note
+    return "completed", None
+
+
 def _prepare_run(agent_id, message, session_id=None, channel_type="web", trigger_type="message",
                   external_chat_id=None, external_user_id=None):
     """Common setup for both streaming and non-streaming agent execution."""
@@ -110,6 +129,7 @@ def stream_response(agent_id, message, session_id=None):
     # Run agent and stream response
     full_response = ""
     usage = {}
+    meta = None
     error = None
 
     try:
@@ -119,8 +139,10 @@ def stream_response(agent_id, message, session_id=None):
             if chunk["type"] == "done":
                 full_response = chunk.get("data", "")
                 usage = chunk.get("usage", {})
+                meta = chunk.get("meta")
             elif chunk["type"] == "error":
                 error = chunk.get("data", "Unknown error")
+                meta = chunk.get("meta")
 
             yield chunk_json
 
@@ -140,14 +162,15 @@ def stream_response(agent_id, message, session_id=None):
         _forward_to_matrix(agent, full_response)
 
     # Finalize run
+    status, error_summary = _resolve_outcome(error, meta)
     finish_run(
         run.id,
-        status="error" if error else "completed",
+        status=status,
         input_tokens=usage.get("input_tokens"),
         output_tokens=usage.get("output_tokens"),
-        error_summary=error,
+        error_summary=error_summary,
     )
-    _close_chat_objective(objective_id, succeeded=not error, error_summary=error)
+    _close_chat_objective(objective_id, succeeded=not error, error_summary=error_summary)
 
 
 def run_agent_non_streaming(agent_id, message, session_id=None, channel_type="web",
@@ -163,6 +186,7 @@ def run_agent_non_streaming(agent_id, message, session_id=None, channel_type="we
 
     full_response = ""
     usage = {}
+    meta = None
     error = None
 
     try:
@@ -171,8 +195,10 @@ def run_agent_non_streaming(agent_id, message, session_id=None, channel_type="we
             if chunk["type"] == "done":
                 full_response = chunk.get("data", "")
                 usage = chunk.get("usage", {})
+                meta = chunk.get("meta")
             elif chunk["type"] == "error":
                 error = chunk.get("data", "Unknown error")
+                meta = chunk.get("meta")
     except Exception as e:
         current_app.logger.error(f"Non-streaming agent error: {e}")
         error = str(e)
@@ -181,14 +207,15 @@ def run_agent_non_streaming(agent_id, message, session_id=None, channel_type="we
         add_message(session.id, role="assistant", content=full_response,
                     token_count=usage.get("output_tokens"))
 
+    status, error_summary = _resolve_outcome(error, meta)
     finish_run(
         run.id,
-        status="error" if error else "completed",
+        status=status,
         input_tokens=usage.get("input_tokens"),
         output_tokens=usage.get("output_tokens"),
-        error_summary=error,
+        error_summary=error_summary,
     )
-    _close_chat_objective(objective_id, succeeded=not error, error_summary=error)
+    _close_chat_objective(objective_id, succeeded=not error, error_summary=error_summary)
 
     return {"response": full_response, "error": error, "session_id": session.id, "run_id": run.id}
 

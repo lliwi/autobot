@@ -13,7 +13,7 @@ DEFAULT_LIMIT = 200
 MAX_LIMIT = 2000
 
 # Execution-log ("Executions" tab) filter vocabularies.
-RUN_STATUSES = ["running", "completed", "error"]
+RUN_STATUSES = ["running", "completed", "partial", "error"]
 RUN_TRIGGERS = ["message", "cron", "heartbeat", "delegation", "internal", "auto_review", "patch_review"]
 RUNS_DEFAULT_LIMIT = 50
 
