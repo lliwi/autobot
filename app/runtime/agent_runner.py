@@ -12,6 +12,28 @@ from app.runtime.tool_executor import execute as execute_tool
 # the ``max_tool_rounds`` column on the ``agents`` table.
 DEFAULT_MAX_TOOL_ROUNDS = 20
 
+# When this many tool-call rounds remain, inject a one-shot system notice so the
+# model can wind down and summarize instead of being cut off mid-task. See #25.
+_LOW_BUDGET_REMAINING = 2
+
+_LOW_BUDGET_NUDGE = (
+    "SYSTEM NOTICE: Your tool-call-round budget is almost exhausted"
+    " ({remaining} round(s) left of {limit}). Do not start new lines of"
+    " investigation. Call a tool only if it is essential to finish the task;"
+    " otherwise stop calling tools and give your best final answer now,"
+    " summarizing what you completed, what you found, and any safe next steps."
+)
+
+# Injected (with tools disabled) for the single finalization turn once the hard
+# round cap is hit, so the user gets a partial synthesis instead of silent loss.
+_FINALIZE_PROMPT = (
+    "SYSTEM ENFORCEMENT: The maximum tool-call-round budget has been reached."
+    " You may not call any more tools. Using the tool results gathered so far,"
+    " write a final answer for the user: summarize the actions completed, the"
+    " key findings, what remains blocked, and concrete safe next steps. Be"
+    " concise and do not apologize."
+)
+
 # Per-call cap on what goes back into the *model's* message stream. The full
 # tool output is still persisted in ``tool_executions`` — this only trims
 # what the model sees on the next round so a single fat response (e.g. a
@@ -125,10 +147,30 @@ def run(agent, session, user_message, run_id):
         or DEFAULT_MAX_TOOL_ROUNDS
     )
 
+    # Termination/observability bookkeeping surfaced on the final chunk (#25).
+    tool_executions_count = 0
+    last_tool_name = None
+    last_tool_status = None
+    low_budget_warned = False
+
     try:
         for round_num in range(max_rounds):
             full_response = ""
             tool_calls = None
+
+            # Warn the model once when only a couple of rounds remain so it can
+            # wind down gracefully instead of being hard-cut mid-task.
+            remaining = max_rounds - round_num
+            if not low_budget_warned and remaining <= _LOW_BUDGET_REMAINING < max_rounds:
+                low_budget_warned = True
+                messages.append({
+                    "role": "system",
+                    "content": _LOW_BUDGET_NUDGE.format(remaining=remaining, limit=max_rounds),
+                })
+                current_app.logger.info(
+                    "agent_runner low-budget warning: agent=%s round=%d remaining=%d",
+                    agent.id, round_num, remaining,
+                )
 
             # Trim accumulated agentic pairs that would push the context over
             # budget. Must happen before the API call so the model never sees
@@ -227,6 +269,11 @@ def run(agent, session, user_message, run_id):
                     return
 
                 result = execute_tool(run_id, agent, tool_name, arguments)
+                tool_executions_count += 1
+                last_tool_name = tool_name
+                last_tool_status = (
+                    "error" if isinstance(result, dict) and result.get("error") else "ok"
+                )
 
                 yield json.dumps({"type": "tool_result", "data": {"tool": tool_name, "result": result}})
 
@@ -239,8 +286,60 @@ def run(agent, session, user_message, run_id):
                     "content": _cap_tool_result_content(result),
                 })
 
-        # Hit max rounds
-        yield json.dumps({"type": "error", "data": "Maximum tool call rounds reached"})
+        # Hit the hard round cap. Rather than dropping the task on the floor,
+        # give the model one final no-tool turn to synthesize a partial answer
+        # from the results gathered so far (#25).
+        meta = {
+            "termination_reason": "max_tool_rounds",
+            "tool_round_limit": max_rounds,
+            "tool_rounds_used": max_rounds,
+            "tool_executions_count": tool_executions_count,
+            "last_tool_name": last_tool_name,
+            "last_tool_status": last_tool_status,
+            "partial": True,
+        }
+        current_app.logger.warning(
+            "agent_runner max_tool_rounds: agent=%s run=%s limit=%d execs=%d last_tool=%s/%s",
+            agent.id, run_id, max_rounds, tool_executions_count,
+            last_tool_name, last_tool_status,
+        )
+
+        _trim_inloop_messages(messages, budget, _fixed_len)
+        messages.append({"role": "system", "content": _FINALIZE_PROMPT})
+
+        final_response = ""
+        try:
+            for delta_type, delta_data in stream_chat_completion(agent, messages, None):
+                if delta_type == "content":
+                    final_response += delta_data
+                    yield json.dumps({"type": "token", "data": delta_data})
+                elif delta_type == "usage":
+                    usage_total["input_tokens"] += delta_data.get("input_tokens", 0)
+                    usage_total["output_tokens"] += delta_data.get("output_tokens", 0)
+        except Exception as e:
+            # Even the summarization turn failed — fall back to a clear error so
+            # the run is still recorded, now with structured context.
+            current_app.logger.error("agent_runner finalization turn failed: %s", e)
+            yield json.dumps({
+                "type": "error",
+                "data": "Maximum tool call rounds reached",
+                "meta": meta,
+            })
+            return
+
+        if not final_response.strip():
+            final_response = (
+                "I reached my tool-call-round limit before finishing this task. "
+                "Partial work was completed but I could not synthesize a final "
+                "summary. Please re-run with a narrower request to continue."
+            )
+
+        yield json.dumps({
+            "type": "done",
+            "data": final_response,
+            "usage": usage_total,
+            "meta": meta,
+        })
     finally:
         # Drop the per-run read cache so long-lived workers don't leak.
         # Runs here if the generator completes, is closed early by the
