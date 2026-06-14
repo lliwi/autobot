@@ -2,8 +2,9 @@ import logging
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from apscheduler.schedulers.background import BackgroundScheduler
-from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
+
+from app.worker.cron_compat import build_cron_trigger
 
 logger = logging.getLogger(__name__)
 
@@ -101,7 +102,7 @@ def _sync_jobs(app):
                                 "Unknown timezone %r for task %s; falling back to UTC",
                                 task.timezone, task.id,
                             )
-                    trigger = CronTrigger.from_crontab(task.schedule_expr, timezone=tz_name)
+                    trigger = build_cron_trigger(task.schedule_expr, timezone=tz_name)
                     _ensure_job(
                         job_id=job_id,
                         func=_execute_cron_task,
