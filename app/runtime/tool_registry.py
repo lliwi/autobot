@@ -257,6 +257,59 @@ def register_builtin_tools():
 
     register(
         ToolDefinition(
+            name="list_global_tools",
+            description=(
+                "List the global tool catalog: every tool's slug, description and which "
+                "agents currently have it enabled. Use this to discover tools you could "
+                "grant to another agent with `grant_tool`."
+            ),
+            parameters={"type": "object", "properties": {}},
+            handler=lambda **kwargs: _list_global_tools(**kwargs),
+        )
+    )
+
+    register(
+        ToolDefinition(
+            name="grant_tool",
+            description=(
+                "Grant another agent access to a global tool by enabling it for them. "
+                "Tools are shared, but each agent only sees the tools assigned to it — "
+                "use this when a sub-agent needs a capability it doesn't yet have. "
+                "Idempotent: re-granting just re-enables it."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "tool": {"type": "string", "description": "Tool slug or name to grant (see list_global_tools)."},
+                    "agent": {"type": "string", "description": "Target agent name or slug to grant the tool to."},
+                },
+                "required": ["tool", "agent"],
+            },
+            handler=lambda **kwargs: _grant_tool(**kwargs),
+        )
+    )
+
+    register(
+        ToolDefinition(
+            name="revoke_tool",
+            description=(
+                "Remove an agent's access to a global tool (disables the assignment). "
+                "Does not delete the tool from the catalog — other agents keep it."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "tool": {"type": "string", "description": "Tool slug or name to revoke."},
+                    "agent": {"type": "string", "description": "Target agent name or slug to revoke from."},
+                },
+                "required": ["tool", "agent"],
+            },
+            handler=lambda **kwargs: _revoke_tool(**kwargs),
+        )
+    )
+
+    register(
+        ToolDefinition(
             name="fetch_url",
             description=(
                 "Fetch the contents of an HTTP(S) URL. Returns up to 200 KB of text. "
@@ -1252,6 +1305,100 @@ def _delete_tool(_agent=None, _run_id=None, slug=None, reason=None, **kwargs):
         "reason": reason,
         "message": f"Tool '{slug}' removed from disk, DB, and TOOLS.md.",
     }
+
+
+def _resolve_tool_row(ident):
+    """Resolve a global Tool by slug or name."""
+    from app.models.tool import Tool
+    return (Tool.query.filter_by(slug=ident).first()
+            or Tool.query.filter_by(name=ident).first())
+
+
+def _resolve_agent_row(ident):
+    """Resolve an Agent by slug or name."""
+    from app.models.agent import Agent
+    return (Agent.query.filter_by(slug=ident).first()
+            or Agent.query.filter_by(name=ident).first())
+
+
+def _list_global_tools(_agent=None, **kwargs):
+    from app.models.tool import AgentTool, Tool
+    from app.models.agent import Agent
+
+    agents = {a.id: (a.name or a.slug) for a in Agent.query.all()}
+    assigns = {}
+    for at in AgentTool.query.filter_by(enabled=True).all():
+        assigns.setdefault(at.tool_id, []).append(agents.get(at.agent_id, str(at.agent_id)))
+
+    tools = []
+    for t in Tool.query.order_by(Tool.name).all():
+        tools.append({
+            "slug": t.slug,
+            "version": t.version,
+            "description": (t.description or "")[:200],
+            "enabled_for": sorted(assigns.get(t.id, [])),
+        })
+    return {"count": len(tools), "tools": tools}
+
+
+def _grant_tool(_agent=None, _run_id=None, tool=None, agent=None, **kwargs):
+    if _agent is None:
+        return {"error": "No agent context"}
+    if not tool or not agent:
+        return {"error": "Both 'tool' and 'agent' are required"}
+
+    from app.extensions import db
+    from app.models.tool import AgentTool
+    from app.workspace.manager import refresh_tools_md
+
+    t = _resolve_tool_row(tool)
+    if t is None:
+        return {"error": f"Tool '{tool}' not found in the global catalog. Use list_global_tools to see available slugs."}
+    target = _resolve_agent_row(agent)
+    if target is None:
+        return {"error": f"Agent '{agent}' not found"}
+
+    existing = AgentTool.query.filter_by(tool_id=t.id, agent_id=target.id).first()
+    if existing is not None:
+        if not existing.enabled:
+            existing.enabled = True
+            db.session.commit()
+            refresh_tools_md(target)
+            return {"granted": True, "tool": t.slug, "agent": target.slug, "message": "re-enabled existing assignment"}
+        return {"granted": True, "tool": t.slug, "agent": target.slug, "message": "already enabled (no change)"}
+
+    db.session.add(AgentTool(tool_id=t.id, agent_id=target.id, enabled=True))
+    db.session.commit()
+    refresh_tools_md(target)
+    return {"granted": True, "tool": t.slug, "agent": target.slug,
+            "message": f"Tool '{t.slug}' is now available to agent '{target.slug}'."}
+
+
+def _revoke_tool(_agent=None, _run_id=None, tool=None, agent=None, **kwargs):
+    if _agent is None:
+        return {"error": "No agent context"}
+    if not tool or not agent:
+        return {"error": "Both 'tool' and 'agent' are required"}
+
+    from app.extensions import db
+    from app.models.tool import AgentTool
+    from app.workspace.manager import refresh_tools_md
+
+    t = _resolve_tool_row(tool)
+    if t is None:
+        return {"error": f"Tool '{tool}' not found"}
+    target = _resolve_agent_row(agent)
+    if target is None:
+        return {"error": f"Agent '{agent}' not found"}
+
+    at = AgentTool.query.filter_by(tool_id=t.id, agent_id=target.id).first()
+    if at is None:
+        return {"revoked": False, "message": f"Agent '{target.slug}' did not have '{t.slug}' assigned"}
+    db.session.delete(at)
+    db.session.commit()
+    refresh_tools_md(target)
+    return {"revoked": True, "tool": t.slug, "agent": target.slug,
+            "message": f"Tool '{t.slug}' removed from agent '{target.slug}'."}
 
 
 _FETCH_MAX_BYTES = 200_000
