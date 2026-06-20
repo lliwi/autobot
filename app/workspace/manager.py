@@ -55,6 +55,13 @@ def get_global_skills_path():
     return path
 
 
+def get_global_tools_path():
+    """Return the shared tools directory: workspaces/_global/tools/."""
+    path = _base_path() / "_global" / "tools"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
+
 def get_workspace_path(agent):
     return Path(agent.workspace_path).resolve()
 
@@ -88,12 +95,12 @@ def refresh_tools_md(agent):
     """
     import logging
     from app.runtime.tool_registry import _registry
-    from app.workspace.discovery import discover_workspace_tools
+    from app.workspace.discovery import get_enabled_tools
 
     logger = logging.getLogger(__name__)
     try:
         builtins = sorted(_registry.values(), key=lambda t: t.name)
-        workspace_tools = discover_workspace_tools(agent)
+        agent_tools = get_enabled_tools(agent)
 
         lines = ["# Tools", ""]
         lines.append("## Built-in Tools")
@@ -102,21 +109,22 @@ def refresh_tools_md(agent):
             lines.append(f"- **{td.name}** — {td.description}")
 
         lines.append("")
-        lines.append("## Workspace Tools")
+        lines.append("## Global Tools (enabled for this agent)")
         lines.append("")
-        if not workspace_tools:
-            lines.append("_None yet — create one with `create_tool`._")
+        if not agent_tools:
+            lines.append("_None enabled — create one with `create_tool` or enable from the catalog._")
         else:
-            for wt in workspace_tools:
-                params = wt.get("parameters", {}).get("properties", {}) or {}
-                required = set(wt.get("parameters", {}).get("required", []) or [])
+            for wt in agent_tools:
+                manifest = wt.manifest_json or {}
+                params = manifest.get("parameters", {}).get("properties", {}) or {}
+                required = set(manifest.get("parameters", {}).get("required", []) or [])
                 param_bits = []
                 for pname, pspec in params.items():
                     ptype = pspec.get("type", "any")
                     marker = "req" if pname in required else "opt"
                     param_bits.append(f"`{pname}` ({ptype}, {marker})")
                 params_line = ", ".join(param_bits) if param_bits else "no arguments"
-                lines.append(f"- **{wt['name']}** — {wt.get('description', '').strip()}")
+                lines.append(f"- **{wt.name}** — {(wt.description or '').strip()}")
                 lines.append(f"  Parameters: {params_line}")
 
         content = "\n".join(lines) + "\n"

@@ -170,7 +170,7 @@ def delete_agent(agent, remove_workspace: bool = False):
     from app.models.scheduled_task import ScheduledTask
     from app.models.session import Session
     from app.models.skill import AgentSkill
-    from app.models.tool import Tool
+    from app.models.tool import AgentTool
     from app.models.tool_execution import ToolExecution
 
     agent_id = agent.id
@@ -184,7 +184,8 @@ def delete_agent(agent, remove_workspace: bool = False):
     ToolExecution.query.filter_by(agent_id=agent_id).delete(synchronize_session=False)
     Run.query.filter_by(agent_id=agent_id).delete(synchronize_session=False)
     Session.query.filter_by(agent_id=agent_id).delete(synchronize_session=False)
-    Tool.query.filter_by(agent_id=agent_id).delete(synchronize_session=False)
+    # Tools are global; only remove this agent's access rows, not the tools.
+    AgentTool.query.filter_by(agent_id=agent_id).delete(synchronize_session=False)
     AgentSkill.query.filter_by(agent_id=agent_id).delete(synchronize_session=False)
     ScheduledTask.query.filter_by(agent_id=agent_id).delete(synchronize_session=False)
     PatchProposal.query.filter_by(agent_id=agent_id).delete(synchronize_session=False)

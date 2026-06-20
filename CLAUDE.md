@@ -54,17 +54,17 @@ workspaces/
   _template/skills/<slug>/    ← golden copy; new agents inherit from here
   _template/tools/<slug>/     ← same for tools
   _global/skills/<slug>/      ← live skills read by the app and DB sync
-  _global/tools/ (unused)     ← tools are per-agent, not global
+  _global/tools/<slug>/       ← live global tools (tool.py + manifest.json)
   <agent-slug>/               ← per-agent workspace
     SOUL.md, MEMORY.md, AGENTS.md, TOOLS.md
     skills/<slug>/            ← agent-local skill copy (deprecated; global preferred)
-    tools/<slug>/tool.py      ← agent-specific tools
-    tools/<slug>/manifest.json
 ```
 
-**Critical distinction:**
-- Skills are **global** — they live in `_global/skills/` and are shared across agents via `AgentSkill` junction rows. Updating `_template/skills/` does NOT update the running DB version; click **Reload** in the dashboard or it auto-syncs when the template version is ahead.
-- Tools are **per-agent** — each agent owns its `tools/<slug>/` directory. Promotion copies a tool to `_template/tools/` for new agents, then broadcasts to existing agents.
+**Critical distinction:** both skills *and* tools are now **global**.
+- Skills live in `_global/skills/` and are shared via `AgentSkill` junction rows. Updating `_template/skills/` does NOT update the running DB version; click **Reload** or it auto-syncs when the template version is ahead.
+- Tools live in `_global/tools/` and are shared via `AgentTool` junction rows. A `Tool` row has no `agent_id`; per-agent access/enablement is an `AgentTool(agent_id, tool_id, enabled)` row. Tools run in the **calling** agent's `.venv` with that agent's injected credentials, so one generic tool serves every agent. Same Reload semantics as skills.
+
+**Versioning policy is enforced:** `create_tool` rejects a slug that already exists (bump the manifest `version` instead) and rejects version-encoding slugs (`foo2`, `foo-v2`). Keep tools generic/parametric — read secrets via `os.environ["AUTOBOT_CRED_<NAME>"]` rather than baking credential variants into separate tools.
 
 ## Skill / Tool Naming Policy
 
@@ -97,7 +97,7 @@ All proposals go through `patch_service` → `patch_validator` (JSON/AST/handler
 ## DB Models (key relationships)
 
 ```
-Agent ──< Tool           (per-agent; enabled flag)
+Agent ──< AgentTool  >── Tool    (global tools, junction table)
 Agent ──< AgentSkill >── Skill   (global skills, junction table)
 Agent ──< Session ──< Message
 Agent ──< Run ──< ToolExecution
@@ -105,7 +105,7 @@ Agent ──< PatchProposal
 Agent ──< ScheduledTask
 ```
 
-`Skill` rows are synced from `_global/skills/` via `sync_global_skills_to_db()`. `Tool` rows are synced from agent workspace via `sync_workspace_tools_to_db()`.
+`Skill` rows are synced from `_global/skills/` via `sync_global_skills_to_db()`. `Tool` rows are synced from `_global/tools/` via `sync_global_tools_to_db()`; passing an `agent` also creates `AgentTool` rows so that agent gets access.
 
 ## Promotion Flow (tool/skill → template)
 

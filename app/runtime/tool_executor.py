@@ -8,7 +8,6 @@ from pathlib import Path
 from flask import current_app
 
 from app.extensions import db
-from app.models.tool import Tool
 from app.models.tool_execution import ToolExecution
 from app.runtime.tool_registry import get as get_tool
 
@@ -55,19 +54,20 @@ def _new_execution(run_id, agent, tool_name, arguments) -> ToolExecution:
 
 
 def _execute_workspace_tool(run_id, agent, tool_name, arguments):
-    tool = Tool.query.filter_by(agent_id=agent.id, slug=tool_name, enabled=True).first()
-    if tool is None:
-        tool = Tool.query.filter_by(agent_id=agent.id, name=tool_name, enabled=True).first()
+    from app.workspace.discovery import resolve_agent_tool, tool_dir_for
+    from app.workspace.manager import get_global_tools_path
+
+    tool = resolve_agent_tool(agent, tool_name)
     if tool is None:
         return {"error": f"Unknown tool: {tool_name}"}
 
-    workspace = Path(agent.workspace_path).resolve()
-    tool_py = (workspace / tool.path / "tool.py").resolve()
+    global_root = get_global_tools_path().parent.resolve()
+    tool_py = (tool_dir_for(tool) / "tool.py").resolve()
     try:
-        tool_py.relative_to(workspace)
+        tool_py.relative_to(global_root)
     except ValueError:
         logger.error("Path traversal attempt: %s", tool_py)
-        return {"error": "tool path escapes workspace"}
+        return {"error": "tool path escapes global tools tree"}
     if not tool_py.exists():
         return {"error": f"tool.py missing at {tool.path}"}
 

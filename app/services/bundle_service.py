@@ -113,8 +113,14 @@ def export_bundle(
     agents_payload = [_serialize_agent(a) for a in agents]
     report.agents = len(agents_payload)
 
-    tools = Tool.query.order_by(Tool.id.asc()).all()
-    tools_payload = [_serialize_tool(t) for t in tools if t.agent]
+    from app.models.tool import AgentTool
+    agent_tools = (
+        AgentTool.query
+        .join(Tool, AgentTool.tool_id == Tool.id)
+        .order_by(Tool.id.asc(), AgentTool.agent_id.asc())
+        .all()
+    )
+    tools_payload = [_serialize_tool_assignment(at) for at in agent_tools if at.agent]
     report.tools = len(tools_payload)
 
     from app.models.skill import AgentSkill
@@ -172,6 +178,11 @@ def export_bundle(
             _add_workspace_dir(tar, agent.slug, ws)
             report.workspaces += 1
 
+        # Archive the shared _global/ tree so global skills/tools files travel too.
+        global_dir = Path(current_app.config["WORKSPACES_BASE_PATH"]).resolve() / "_global"
+        if global_dir.exists():
+            _add_workspace_dir(tar, "_global", global_dir)
+
         if include_env:
             env_path = _project_root() / ".env"
             if env_path.exists():
@@ -199,15 +210,17 @@ def _serialize_agent(a: Agent) -> dict:
     }
 
 
-def _serialize_tool(t: Tool) -> dict:
+def _serialize_tool_assignment(at) -> dict:
+    """Serialize a global tool + its per-agent assignment for the bundle."""
+    t = at.tool
     return {
-        "agent_slug": t.agent.slug,
+        "agent_slug": at.agent.slug,
         "slug": t.slug,
         "name": t.name,
         "version": t.version,
         "description": t.description,
         "source": t.source,
-        "enabled": t.enabled,
+        "enabled": at.enabled,
         "manifest_json": t.manifest_json,
         "path": t.path,
         "timeout": t.timeout,
@@ -420,6 +433,11 @@ def _import_agents(
             _restore_workspace(src_ws, Path(workspace_path), overwrite)
             report.workspaces_restored += 1
 
+    # Restore the shared _global/ tree (global skills + tools files).
+    src_global = bundle_root / "workspaces" / "_global"
+    if src_global.exists():
+        _restore_workspace(src_global, workspaces_base / "_global", overwrite)
+
     return slug_to_agent
 
 
@@ -481,42 +499,58 @@ def _import_tools(
     overwrite: bool,
     report: ImportReport,
 ) -> None:
+    from datetime import datetime, timezone
+    from app.models.tool import AgentTool
+
     for entry in payload:
-        agent = slug_to_agent.get(entry.get("agent_slug"))
-        if not agent:
-            report.warnings.append(
-                f"tools.json: skipped '{entry.get('slug')}' — agent '{entry.get('agent_slug')}' missing"
-            )
-            continue
+        slug = entry.get("slug")
+        agent_slug = entry.get("agent_slug")
+        agent = slug_to_agent.get(agent_slug) if agent_slug else None
 
-        existing = Tool.query.filter_by(agent_id=agent.id, slug=entry.get("slug")).first()
-        if existing and not overwrite:
-            continue
-
-        if existing:
-            existing.name = entry.get("name") or existing.name
-            existing.version = entry.get("version") or existing.version
-            existing.description = entry.get("description")
-            existing.source = entry.get("source") or existing.source
-            existing.enabled = bool(entry.get("enabled", existing.enabled))
-            existing.manifest_json = entry.get("manifest_json")
-            existing.path = entry.get("path") or existing.path
-            existing.timeout = entry.get("timeout")
-            report.tools_updated += 1
-        else:
-            db.session.add(Tool(
-                agent_id=agent.id,
-                name=entry.get("name") or entry.get("slug"),
-                slug=entry.get("slug"),
+        # Upsert the global Tool row (one per slug, no agent ownership)
+        tool = Tool.query.filter_by(slug=slug).first()
+        if tool is None:
+            tool = Tool(
+                name=entry.get("name") or slug,
+                slug=slug,
                 version=entry.get("version") or "0.1.0",
                 description=entry.get("description"),
                 source=entry.get("source") or "workspace",
-                enabled=bool(entry.get("enabled", True)),
                 manifest_json=entry.get("manifest_json"),
-                path=entry.get("path") or f"tools/{entry.get('slug')}",
+                path=entry.get("path") or f"tools/{slug}",
                 timeout=entry.get("timeout"),
-            ))
+            )
+            db.session.add(tool)
+            db.session.flush()
             report.tools_created += 1
+        elif overwrite:
+            tool.name = entry.get("name") or tool.name
+            tool.version = entry.get("version") or tool.version
+            tool.description = entry.get("description")
+            tool.source = entry.get("source") or tool.source
+            tool.manifest_json = entry.get("manifest_json")
+            tool.path = entry.get("path") or tool.path
+            tool.timeout = entry.get("timeout")
+            report.tools_updated += 1
+
+        # Create AgentTool assignment if agent is known
+        if agent is None:
+            if agent_slug:
+                report.warnings.append(
+                    f"tools.json: agent '{agent_slug}' missing — tool '{slug}' imported globally without assignment"
+                )
+            continue
+
+        at = AgentTool.query.filter_by(agent_id=agent.id, tool_id=tool.id).first()
+        if at is None:
+            db.session.add(AgentTool(
+                agent_id=agent.id,
+                tool_id=tool.id,
+                enabled=bool(entry.get("enabled", True)),
+                created_at=datetime.now(timezone.utc),
+            ))
+        elif overwrite:
+            at.enabled = bool(entry.get("enabled", True))
 
 
 def _import_skills(

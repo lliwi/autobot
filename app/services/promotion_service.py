@@ -242,8 +242,8 @@ def broadcast_to_all_agents(agent_id: int | None, item_type: str, slug: str) -> 
                 from app.services.skill_service import assign_skill_to_agent
                 assign_skill_to_agent(item.id, target_agent.id)
             else:
-                from app.services.tool_service import copy_tool
-                copy_tool(item.id, target_agent.id)
+                from app.services.tool_service import assign_tool_to_agent
+                assign_tool_to_agent(item.id, target_agent.id)
             copied += 1
         except ValueError as e:
             errors.append(f"{target_agent.slug}: {e}")
@@ -270,19 +270,15 @@ def _resolve_and_validate(agent_id: int | None, item_type: str, slug: str) -> di
     if item is None:
         return {"ok": False, "error": f"{item_type.capitalize()} '{slug}' not found"}
 
+    # Both skills and tools are global — the source is always under _global/.
     if item_type == "skill":
         from app.workspace.manager import get_global_skills_path
         source_dir = get_global_skills_path() / slug
-        workspace_root = source_dir.parent.parent  # _global/
-        agent = None
     else:
-        agent = db.session.get(Agent, agent_id)
-        if agent is None:
-            return {"ok": False, "error": "Agent not found"}
-        if not item.enabled:
-            return {"ok": False, "error": f"Tool '{slug}' is disabled — enable it before promoting"}
-        workspace_root = get_workspace_path(agent)
-        source_dir = workspace_root / _ITEM_DIRS[item_type] / slug
+        from app.workspace.manager import get_global_tools_path
+        source_dir = get_global_tools_path() / slug
+    workspace_root = source_dir.parent.parent  # _global/
+    agent = None
 
     if not source_dir.exists():
         return {"ok": False, "error": f"Source directory not found: {source_dir}"}
@@ -306,9 +302,9 @@ def _resolve_and_validate(agent_id: int | None, item_type: str, slug: str) -> di
 
 
 def _get_item(item_type: str, agent_id: int | None, slug: str):
+    # Both tools and skills are global — agent_id is irrelevant.
     if item_type == "tool":
-        return Tool.query.filter_by(agent_id=agent_id, slug=slug).first()
-    # Skills are global — agent_id is irrelevant
+        return Tool.query.filter_by(slug=slug).first()
     return Skill.query.filter_by(slug=slug).first()
 
 

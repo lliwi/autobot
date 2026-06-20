@@ -8,8 +8,9 @@
     <div>
         <form method="POST" action="{{ url_for('dashboard.tools_sync', agent_id=agent.id) }}" style="display:inline;">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-            <button type="submit" class="btn btn-primary">Sync from Workspace</button>
+            <button type="submit" class="btn btn-primary">Sync from Catalog</button>
         </form>
+        <a href="{{ url_for('dashboard.tools_overview') }}" class="btn">Global catalog</a>
         <a href="{{ url_for('dashboard.agent_detail', agent_id=agent.id) }}" class="btn">Back to Agent</a>
     </div>
 </div>
@@ -29,6 +30,8 @@
     </thead>
     <tbody>
         {% for tool in tools %}
+        {% set at = agent_tools_map.get(tool.id) %}
+        {% set enabled = at.enabled if at else False %}
         <tr>
             <td>
                 <strong>{{ tool.name }}</strong>
@@ -38,7 +41,7 @@
             <td>{{ tool.version }}</td>
             <td>{{ tool.source }}</td>
             <td>{{ tool.timeout or '-' }}s</td>
-            <td><span class="badge badge-{{ 'active' if tool.enabled else 'inactive' }}">{{ 'Enabled' if tool.enabled else 'Disabled' }}</span></td>
+            <td><span class="badge badge-{{ 'active' if enabled else 'inactive' }}">{{ 'Enabled' if enabled else 'Disabled' }}</span></td>
             <td>
                 {% if tool.slug in promoted_slugs %}
                     <span class="badge badge-active" title="Ya incluida en _template/">&#9733; En template</span>
@@ -53,10 +56,12 @@
                 </form>
                 <form method="POST" action="{{ url_for('dashboard.tool_toggle', tool_id=tool.id) }}" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-                    <button type="submit" class="btn btn-sm">{{ 'Disable' if tool.enabled else 'Enable' }}</button>
+                    <input type="hidden" name="agent_id" value="{{ agent.id }}">
+                    <button type="submit" class="btn btn-sm">{{ 'Disable' if enabled else 'Enable' }}</button>
                 </form>
                 <form method="POST" action="{{ url_for('dashboard.tool_test', tool_id=tool.id) }}" style="display:inline;">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <input type="hidden" name="agent_id" value="{{ agent.id }}">
                     <button type="submit" class="btn btn-sm">Test</button>
                 </form>
                 {% if is_admin %}

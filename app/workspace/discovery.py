@@ -10,9 +10,13 @@ from pathlib import Path
 
 from app.extensions import db
 from app.models.skill import AgentSkill, Skill
-from app.models.tool import Tool
+from app.models.tool import AgentTool, Tool
 from app.runtime.tool_registry import get_all_definitions as get_builtin_definitions
-from app.workspace.manager import get_global_skills_path, get_workspace_path
+from app.workspace.manager import (
+    get_global_skills_path,
+    get_global_tools_path,
+    get_workspace_path,
+)
 from app.workspace.manifest import load_manifest, validate_skill_manifest, validate_tool_manifest
 
 logger = logging.getLogger(__name__)
@@ -21,10 +25,9 @@ logger = logging.getLogger(__name__)
 # -- Filesystem discovery --
 
 
-def discover_workspace_tools(agent):
-    """Scan tools/ directory and return list of valid tool dicts."""
-    workspace = get_workspace_path(agent)
-    tools_dir = workspace / "tools"
+def discover_global_tools():
+    """Scan _global/tools/ and return list of valid tool dicts."""
+    tools_dir = get_global_tools_path()
     if not tools_dir.exists():
         return []
 
@@ -101,17 +104,23 @@ def discover_global_skills():
 # -- DB sync --
 
 
-def sync_tools_to_db(agent):
-    """Discover workspace tools and upsert Tool rows. Returns list of Tool instances."""
-    discovered = discover_workspace_tools(agent)
+def sync_global_tools_to_db(agent=None):
+    """Discover global tools and upsert Tool rows.
+
+    When ``agent`` is provided, also creates AgentTool rows for any newly
+    discovered tool so the agent has access to it, and disables AgentTool
+    rows whose underlying tool directory was removed.
+
+    Returns list of Tool instances.
+    """
+    discovered = discover_global_tools()
     discovered_slugs = {t["slug"] for t in discovered}
 
-    existing = Tool.query.filter_by(agent_id=agent.id).all()
-    existing_map = {t.slug: t for t in existing}
+    existing = {t.slug: t for t in Tool.query.all()}
 
     results = []
     for td in discovered:
-        tool = existing_map.get(td["slug"])
+        tool = existing.get(td["slug"])
         if tool:
             tool.name = td["name"]
             tool.description = td["description"]
@@ -121,31 +130,56 @@ def sync_tools_to_db(agent):
             tool.timeout = td["timeout"]
         else:
             tool = Tool(
-                agent_id=agent.id,
                 name=td["name"],
                 slug=td["slug"],
                 description=td["description"],
                 version=td["version"],
                 source="workspace",
-                enabled=True,
                 manifest_json=td["manifest"],
                 path=td["path"],
                 timeout=td["timeout"],
             )
             db.session.add(tool)
+        db.session.flush()
         results.append(tool)
 
-        # Register packages from requirements.txt for new tools (or if file appeared)
-        tool_dir = get_workspace_path(agent) / td["path"]
-        _register_requirements(agent, tool_dir)
+        if agent is not None:
+            _ensure_agent_tool(agent, tool)
+            # Register packages from requirements.txt for this agent's venv
+            tool_dir = get_global_tools_path() / td["slug"]
+            _register_requirements(agent, tool_dir)
 
-    # Disable tools whose directory was removed
-    for slug, tool in existing_map.items():
-        if slug not in discovered_slugs:
-            tool.enabled = False
+    # Disable AgentTool rows whose tool directory was removed (soft).
+    if agent is not None:
+        for slug, removed in existing.items():
+            if slug not in discovered_slugs:
+                at = AgentTool.query.filter_by(
+                    agent_id=agent.id, tool_id=removed.id
+                ).first()
+                if at:
+                    at.enabled = False
 
     db.session.commit()
     return results
+
+
+# Keep old name as alias for callers that still use it
+sync_tools_to_db = sync_global_tools_to_db
+
+
+def _ensure_agent_tool(agent, tool):
+    """Create an AgentTool row if one doesn't already exist for (agent, tool)."""
+    from datetime import datetime, timezone
+    existing = AgentTool.query.filter_by(
+        agent_id=agent.id, tool_id=tool.id
+    ).first()
+    if existing is None:
+        db.session.add(AgentTool(
+            agent_id=agent.id,
+            tool_id=tool.id,
+            enabled=True,
+            created_at=datetime.now(timezone.utc),
+        ))
 
 
 def sync_global_skills_to_db(agent=None):
@@ -257,25 +291,56 @@ def _register_requirements(agent, item_dir: Path) -> None:
 # -- Dynamic tool loading --
 
 
+def resolve_agent_tool(agent, tool_name):
+    """Find a global Tool the *agent* has enabled, by slug or manifest name.
+
+    Returns the Tool row or None.
+    """
+    tool = (
+        Tool.query
+        .join(AgentTool, AgentTool.tool_id == Tool.id)
+        .filter(
+            AgentTool.agent_id == agent.id,
+            AgentTool.enabled.is_(True),
+            Tool.slug == tool_name,
+        )
+        .first()
+    )
+    if tool is None:
+        tool = (
+            Tool.query
+            .join(AgentTool, AgentTool.tool_id == Tool.id)
+            .filter(
+                AgentTool.agent_id == agent.id,
+                AgentTool.enabled.is_(True),
+                Tool.name == tool_name,
+            )
+            .first()
+        )
+    return tool
+
+
+def tool_dir_for(tool):
+    """Absolute directory of a global tool: _global/tools/<slug>/."""
+    return get_global_tools_path().parent / tool.path
+
+
 def load_tool_handler(agent, tool_name):
-    """Dynamically import a workspace tool's handler function.
+    """Dynamically import a global tool's handler function.
 
     Returns the callable or None if not found/invalid.
     """
-    tool = Tool.query.filter_by(agent_id=agent.id, slug=tool_name, enabled=True).first()
-    if tool is None:
-        # Also try by name (tool_name might be the manifest name, not slug)
-        tool = Tool.query.filter_by(agent_id=agent.id, name=tool_name, enabled=True).first()
+    tool = resolve_agent_tool(agent, tool_name)
     if tool is None:
         return None
 
-    workspace = get_workspace_path(agent)
-    tool_py = workspace / tool.path / "tool.py"
+    global_root = get_global_tools_path().parent.resolve()
+    tool_py = tool_dir_for(tool) / "tool.py"
 
-    # Path traversal protection
+    # Path traversal protection — must stay within the global tools tree
     try:
         resolved = tool_py.resolve()
-        if not resolved.is_relative_to(workspace.resolve()):
+        if not resolved.is_relative_to(global_root):
             logger.error(f"Path traversal attempt: {tool_py}")
             return None
     except (ValueError, OSError):
@@ -338,8 +403,8 @@ def get_agent_tool_definitions(agent):
     definitions = list(get_builtin_definitions())
     builtin_names = {d["function"]["name"] for d in definitions}
 
-    # Add enabled workspace tools
-    tools = Tool.query.filter_by(agent_id=agent.id, enabled=True).all()
+    # Add global tools the agent has enabled (via the agent_tools junction)
+    tools = get_enabled_tools(agent)
     for tool in tools:
         manifest = tool.manifest_json or {}
         name = manifest.get("name", tool.name)
@@ -375,5 +440,16 @@ def get_enabled_skills(agent):
         Skill.query
         .join(AgentSkill, AgentSkill.skill_id == Skill.id)
         .filter(AgentSkill.agent_id == agent.id, AgentSkill.enabled.is_(True))
+        .all()
+    )
+
+
+def get_enabled_tools(agent):
+    """Get enabled tools for an agent via the agent_tools junction table."""
+    return (
+        Tool.query
+        .join(AgentTool, AgentTool.tool_id == Tool.id)
+        .filter(AgentTool.agent_id == agent.id, AgentTool.enabled.is_(True))
+        .order_by(Tool.name)
         .all()
     )

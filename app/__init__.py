@@ -290,12 +290,10 @@ def register_cli(app):
             click.echo(f"  ⚠ {w}")
 
     @app.cli.command("reconcile-tools")
-    @click.option("--agent-id", type=int, default=None,
-                  help="Reconcile only this agent. Default: all agents.")
     @click.option("--apply", is_flag=True, default=False,
                   help="Delete stale Tool rows from DB. Without this flag: dry-run only.")
-    def reconcile_tools(agent_id, apply):
-        """Reconcile Tool DB rows against each agent's workspace filesystem.
+    def reconcile_tools(apply):
+        """Reconcile global Tool DB rows against the _global/tools/ filesystem.
 
         Deletes rows whose tool directory no longer exists on disk, removing
         them from the UI entirely. Reports versioned slugs (-vN) still present.
@@ -303,46 +301,33 @@ def register_cli(app):
         """
         import re as _re
 
-        from app.models.agent import Agent
         from app.models.tool import Tool
-        from app.workspace.manager import get_workspace_path
+        from app.workspace.manager import get_global_tools_path
 
         _VN = _re.compile(r"-v[0-9]+$|[a-z][2-9]$|[a-z][1-9][0-9]+$")
 
-        agents = (
-            [db.session.get(Agent, agent_id)] if agent_id else Agent.query.all()
-        )
-        if not agents or agents[0] is None:
-            raise click.ClickException(f"Agent {agent_id} not found")
+        tools_dir = get_global_tools_path()
+        fs_slugs = {
+            d.name for d in tools_dir.iterdir()
+            if d.is_dir() and not d.name.startswith(".")
+        } if tools_dir.exists() else set()
 
         total_deleted = total_stale_vn = 0
 
-        for agent in agents:
-            workspace = get_workspace_path(agent)
-            tools_dir = workspace / "tools"
+        for tool in Tool.query.all():
+            slug = tool.slug
+            if slug not in fs_slugs:
+                status = "DELETED" if apply else "WOULD DELETE"
+                click.echo(f"  [{status}] {slug} — not on disk")
+                if apply:
+                    db.session.delete(tool)
+                    total_deleted += 1
+            elif _VN.search(slug):
+                click.echo(f"  [WARN] {slug} — versioned slug; run workspace_tools_manager.py --repair")
+                total_stale_vn += 1
 
-            fs_slugs = set()
-            if tools_dir.exists():
-                for d in tools_dir.iterdir():
-                    if d.is_dir() and not d.name.startswith("."):
-                        fs_slugs.add(d.name)
-
-            db_tools = Tool.query.filter_by(agent_id=agent.id).all()
-
-            for tool in db_tools:
-                slug = tool.slug
-                if slug not in fs_slugs:
-                    status = "DELETED" if apply else "WOULD DELETE"
-                    click.echo(f"  [{status}] {agent.slug}/{slug} — not on disk")
-                    if apply:
-                        db.session.delete(tool)
-                        total_deleted += 1
-                elif _VN.search(slug):
-                    click.echo(f"  [WARN] {agent.slug}/{slug} — versioned slug; run workspace_tools_manager.py --repair")
-                    total_stale_vn += 1
-
-            if apply:
-                db.session.commit()
+        if apply:
+            db.session.commit()
 
         mode = "applied" if apply else "dry-run"
         click.echo(
@@ -350,58 +335,43 @@ def register_cli(app):
         )
 
     @app.cli.command("audit-tools")
-    @click.option("--agent-id", type=int, default=None,
-                  help="Audit only this agent. Default: all agents.")
     @click.option("--json", "as_json", is_flag=True, default=False,
                   help="Print machine-readable JSON report.")
     @click.option("--no-ref-scan", is_flag=True, default=False,
                   help="Skip scanning docs/skills/tools for versioned references.")
-    def audit_tools(agent_id, as_json, no_ref_scan):
-        """Audit workspace tool naming policy for one or all agents.
+    def audit_tools(as_json, no_ref_scan):
+        """Audit the global tool catalog naming policy.
 
         Wraps scripts/workspace_tools_manager.py so the check can be run
-        from Flask context (with DB available for cross-referencing).
-        Exits with code 2 when error-level findings exist (usable as CI gate).
+        from Flask context. Exits with code 2 when error-level findings exist
+        (usable as CI gate).
         """
         import importlib.util
         import json as _json
         import sys
         from pathlib import Path
 
-        from app.models.agent import Agent
-        from app.workspace.manager import get_workspace_path
+        from app.workspace.manager import get_global_tools_path
 
         mgr_path = Path(__file__).resolve().parent.parent / "scripts" / "workspace_tools_manager.py"
         spec = importlib.util.spec_from_file_location("workspace_tools_manager", mgr_path)
         mgr = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(mgr)
 
-        agents = (
-            [db.session.get(Agent, agent_id)] if agent_id else Agent.query.all()
-        )
-        if not agents or agents[0] is None:
-            raise click.ClickException(f"Agent {agent_id} not found")
-
-        combined_ok = True
-        all_reports = {}
-
-        for agent in agents:
-            workspace = get_workspace_path(agent)
-            report = mgr.build_report(workspace, include_refs=not no_ref_scan)
-            all_reports[agent.slug] = report
-            if not report["ok"]:
-                combined_ok = False
+        # The global tools tree lives at _global/; build_report expects a root
+        # containing a tools/ subdir.
+        global_root = get_global_tools_path().parent
+        report = mgr.build_report(global_root, include_refs=not no_ref_scan)
 
         if as_json:
-            click.echo(_json.dumps(all_reports, indent=2))
+            click.echo(_json.dumps({"_global": report}, indent=2))
         else:
-            for slug, report in all_reports.items():
-                click.echo(f"\n── {slug} ── {report['tool_count']} tools, versioned: {report['versioned_tool_dirs'] or 'none'}")
-                for f in report["findings"]:
-                    click.echo(f"  [{f['severity']}] {f['code']}: {f['message']}")
-                click.echo(f"  {'OK' if report['ok'] else 'FAILED'}")
+            click.echo(f"\n── _global ── {report['tool_count']} tools, versioned: {report['versioned_tool_dirs'] or 'none'}")
+            for f in report["findings"]:
+                click.echo(f"  [{f['severity']}] {f['code']}: {f['message']}")
+            click.echo(f"  {'OK' if report['ok'] else 'FAILED'}")
 
-        if not combined_ok:
+        if not report["ok"]:
             sys.exit(2)
 
 

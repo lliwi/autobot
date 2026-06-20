@@ -186,8 +186,14 @@ def register_builtin_tools():
         ToolDefinition(
             name="create_tool",
             description=(
-                "Create a new workspace tool (manifest.json + tool.py) in one call under "
-                "`tools/<slug>/`. Prefer this over chaining propose_change for new tools."
+                "Create a new tool in the GLOBAL catalog (manifest.json + tool.py) under "
+                "`_global/tools/<slug>/` and enable it for yourself. Tools are shared by all "
+                "agents, so make them GENERIC and REUSABLE: take parameters (host, action, "
+                "credential name, ...) instead of hardcoding; read secrets via "
+                "`os.environ['AUTOBOT_CRED_<NAME>']`. Before creating, check if an existing "
+                "tool already does this — if so, update it and bump its manifest 'version' "
+                "rather than creating a near-duplicate. NEVER encode a version in the slug "
+                "(no `foo2`, no `foo-v2`)."
             ),
             parameters={
                 "type": "object",
@@ -1079,15 +1085,31 @@ def _create_tool(_agent=None, _run_id=None, slug=None, description=None,
     ) if not v]
     if missing:
         return {"error": f"Missing required argument(s): {', '.join(missing)}"}
-    if not _SKILL_SLUG_RE.match(slug):
-        return {"error": "slug must be lowercase kebab-case."}
     if not isinstance(parameters_schema, dict):
         return {"error": "parameters_schema must be a JSON object."}
     if "def handler" not in code:
         return {"error": "code must define a `handler` function."}
 
-    from app.services.patch_service import propose_change
+    from app.models.tool import Tool
+    from app.services.tool_service import validate_tool_slug
 
+    slug_error = validate_tool_slug(slug)
+    if slug_error:
+        return {"error": slug_error}
+
+    # Versioning policy: never create a sibling tool — bump the existing one.
+    if Tool.query.filter_by(slug=slug).first():
+        return {
+            "error": (
+                f"A tool '{slug}' already exists in the global catalog. Do NOT create "
+                f"'{slug}2' or '{slug}-v2'. Update tools/{slug}/ and bump 'version' in "
+                "its manifest.json instead."
+            )
+        }
+
+    from app.workspace.manager import get_global_tools_path
+
+    tool_dir = get_global_tools_path() / slug
     manifest = {
         "name": slug,
         "description": description,
@@ -1097,29 +1119,20 @@ def _create_tool(_agent=None, _run_id=None, slug=None, description=None,
 
     outputs = []
     try:
-        man_patch = propose_change(
-            agent_id=_agent.id,
-            target_path=f"tools/{slug}/manifest.json",
-            new_content=json.dumps(manifest, indent=2) + "\n",
-            title=f"Create tool '{slug}'",
-            reason=description,
-            run_id=_run_id,
+        tool_dir.mkdir(parents=True, exist_ok=True)
+        (tool_dir / "manifest.json").write_text(
+            json.dumps(manifest, indent=2) + "\n", encoding="utf-8"
         )
-        outputs.append({"file": f"tools/{slug}/manifest.json", "patch_id": man_patch.id, "status": man_patch.status})
-        code_patch = propose_change(
-            agent_id=_agent.id,
-            target_path=f"tools/{slug}/tool.py",
-            new_content=code if code.endswith("\n") else code + "\n",
-            title=f"Create tool code for '{slug}'",
-            reason=description,
-            run_id=_run_id,
+        outputs.append({"file": f"_global/tools/{slug}/manifest.json", "status": "applied"})
+        (tool_dir / "tool.py").write_text(
+            code if code.endswith("\n") else code + "\n", encoding="utf-8"
         )
-        outputs.append({"file": f"tools/{slug}/tool.py", "patch_id": code_patch.id, "status": code_patch.status})
-    except ValueError as e:
+        outputs.append({"file": f"_global/tools/{slug}/tool.py", "status": "applied"})
+    except OSError as e:
         return {"error": str(e), "created": outputs}
 
-    from app.workspace.discovery import sync_tools_to_db
-    sync_tools_to_db(_agent)
+    from app.workspace.discovery import sync_global_tools_to_db
+    sync_global_tools_to_db(_agent)
 
     from app.workspace.manager import refresh_tools_md
     refresh_tools_md(_agent)
@@ -1144,25 +1157,28 @@ def _rename_tool(_agent=None, _run_id=None, old_slug=None, new_slug=None, **kwar
         return {"error": "No agent context"}
     if not old_slug or not new_slug:
         return {"error": "Both old_slug and new_slug are required"}
-    if not _SKILL_SLUG_RE.match(new_slug):
-        return {"error": "new_slug must be lowercase kebab-case (no version suffixes)"}
     if old_slug == new_slug:
         return {"error": "old_slug and new_slug are identical"}
 
     from app.extensions import db
     from app.models.tool import Tool
-    from app.workspace.manager import get_workspace_path
+    from app.services.tool_service import validate_tool_slug
+    from app.workspace.manager import get_global_tools_path
 
-    old_tool = Tool.query.filter_by(agent_id=_agent.id, slug=old_slug).first()
+    slug_error = validate_tool_slug(new_slug)
+    if slug_error:
+        return {"error": f"new_slug invalid: {slug_error}"}
+
+    old_tool = Tool.query.filter_by(slug=old_slug).first()
     if old_tool is None:
-        return {"error": f"Tool '{old_slug}' not found in this agent's workspace"}
+        return {"error": f"Tool '{old_slug}' not found in the global catalog"}
 
-    if Tool.query.filter_by(agent_id=_agent.id, slug=new_slug).first():
+    if Tool.query.filter_by(slug=new_slug).first():
         return {"error": f"Tool '{new_slug}' already exists — choose a different name"}
 
-    workspace = get_workspace_path(_agent)
-    old_dir = workspace / "tools" / old_slug
-    new_dir = workspace / "tools" / new_slug
+    tools_root = get_global_tools_path()
+    old_dir = tools_root / old_slug
+    new_dir = tools_root / new_slug
 
     if not old_dir.exists():
         return {"error": f"Directory 'tools/{old_slug}' not found on disk"}
@@ -1212,14 +1228,13 @@ def _delete_tool(_agent=None, _run_id=None, slug=None, reason=None, **kwargs):
 
     from app.extensions import db
     from app.models.tool import Tool
-    from app.workspace.manager import get_workspace_path
+    from app.workspace.manager import get_global_tools_path
 
-    tool = Tool.query.filter_by(agent_id=_agent.id, slug=slug).first()
+    tool = Tool.query.filter_by(slug=slug).first()
     if tool is None:
-        return {"error": f"Tool '{slug}' not found in this agent's workspace"}
+        return {"error": f"Tool '{slug}' not found in the global catalog"}
 
-    workspace = get_workspace_path(_agent)
-    tool_dir = workspace / "tools" / slug
+    tool_dir = get_global_tools_path() / slug
 
     import shutil as _shutil
     if tool_dir.exists():

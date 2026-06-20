@@ -5,7 +5,7 @@
 {% block content %}
 <div class="page-header">
     <h1>Tools catalog</h1>
-    <small>{{ builtins|length }} built-in tool(s) + {{ grouped|length }} workspace tool slug(s).</small>
+    <small>{{ builtins|length }} built-in tool(s) + {{ tools|length }} global tool(s) — assign each to the agents that should use it.</small>
 </div>
 
 <div class="section">
@@ -50,44 +50,100 @@
 </div>
 
 <div class="section">
-    <h2>Workspace tools</h2>
+    <h2>Global tools</h2>
     <p style="color: var(--text-muted); margin-bottom: 12px;">
-        Defined per agent under <code>tools/</code> in the agent workspace. Sync from each agent's tools panel.
+        Shared across all agents. Each tool is enabled per-agent via the assignment below.
     </p>
-    {% if grouped %}
+    {% if tools %}
     <table class="table">
         <thead>
             <tr>
                 <th>Tool</th>
                 <th>Version</th>
-                <th>Owned by</th>
-                <th>Timeout</th>
+                <th>Assigned agents</th>
+                <th>Assign to agent</th>
+                <th>Actions</th>
             </tr>
         </thead>
         <tbody>
-            {% for g in grouped %}
-            {% for tool in g['items'] %}
+            {% for tool in tools %}
+            {% set assignments = tool_assignments.get(tool.id, []) %}
+            {% set assigned_ids = assignments | map(attribute='agent_id') | list %}
             <tr>
-                {% if loop.first %}
-                <td rowspan="{{ g['items']|length }}">
-                    <strong>{{ g['name'] }}</strong><br>
-                    <small><code>{{ g['slug'] }}</code></small>
+                <td>
+                    <strong>{{ tool.name }}</strong><br>
+                    <small><code>{{ tool.slug }}</code></small>
                     {% if tool.description %}<br><small>{{ tool.description }}</small>{% endif %}
                 </td>
-                {% endif %}
-                <td>{{ tool.version }}</td>
                 <td>
-                    <a href="{{ url_for('dashboard.tools_list', agent_id=tool.agent_id) }}">{{ tool.agent.name }}</a>
-                    <span class="badge badge-{{ 'active' if tool.enabled else 'inactive' }}">{{ 'enabled' if tool.enabled else 'disabled' }}</span>
+                    {% if tool.slug in template_updates %}
+                        {{ template_updates[tool.slug] }}<br>
+                        <span class="badge badge-warning" title="Instalada v{{ tool.version }} — haz Reload para actualizar al template">&#9733; template v{{ tool.version }}</span>
+                    {% else %}
+                        {{ tool.version }}<br>
+                        {% if tool.slug in promoted_slugs %}
+                            <span class="badge badge-active" title="Ya incluida en _template/">&#9733; template</span>
+                        {% endif %}
+                    {% endif %}
                 </td>
-                <td>{{ tool.timeout or '-' }}s</td>
+                <td>
+                    {% if assignments %}
+                        {% for at in assignments %}
+                            {% for a in agents if a.id == at.agent_id %}
+                            <div style="display:flex; align-items:center; gap:0.25rem; margin-bottom:0.2rem;">
+                                <a href="{{ url_for('dashboard.tools_list', agent_id=a.id) }}">{{ a.name }}</a>
+                                <span class="badge badge-{{ 'active' if at.enabled else 'inactive' }}">{{ 'on' if at.enabled else 'off' }}</span>
+                                <form method="POST" action="{{ url_for('dashboard.tool_unassign', tool_id=tool.id) }}" style="display:inline;">
+                                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                                    <input type="hidden" name="agent_id" value="{{ a.id }}">
+                                    <button type="submit" class="btn btn-sm" title="Desasignar de {{ a.name }}" onclick="return confirm('¿Desasignar tool de {{ a.name }}?')">✕</button>
+                                </form>
+                            </div>
+                            {% endfor %}
+                        {% endfor %}
+                    {% else %}
+                        <small style="color: var(--text-muted)">ninguno</small>
+                    {% endif %}
+                </td>
+                <td>
+                    {% set candidates = agents | rejectattr('id', 'in', assigned_ids) | list %}
+                    {% if candidates %}
+                    <form method="POST" action="{{ url_for('dashboard.tool_assign', tool_id=tool.id) }}" style="display:inline-flex; gap:0.25rem;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <select name="target_agent_id" required>
+                            <option value="">— agente —</option>
+                            {% for a in candidates %}
+                            <option value="{{ a.id }}">{{ a.name }}</option>
+                            {% endfor %}
+                        </select>
+                        <button type="submit" class="btn btn-sm">Asignar</button>
+                    </form>
+                    {% else %}
+                        <small style="color: var(--text-muted)">asignada a todos</small>
+                    {% endif %}
+                </td>
+                <td>
+                    <form method="POST" action="{{ url_for('dashboard.tool_reload', tool_id=tool.id) }}" style="display:inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm">Reload</button>
+                    </form>
+                    {% if is_admin %}
+                    <form method="POST" action="{{ url_for('dashboard.tool_promote_bundle', tool_id=tool.id) }}" style="display:inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm" title="Descargar bundle listo para PR manual">&#128230; Bundle</button>
+                    </form>
+                    <form method="POST" action="{{ url_for('dashboard.tool_promote_pr', tool_id=tool.id) }}" style="display:inline;">
+                        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                        <button type="submit" class="btn btn-sm" title="Crear PR en GitHub (requiere GH_TOKEN)">&#128260; PR</button>
+                    </form>
+                    {% endif %}
+                </td>
             </tr>
-            {% endfor %}
             {% endfor %}
         </tbody>
     </table>
     {% else %}
-    <p class="empty-state">No workspace tools have been synced yet. Open an agent and click "Sync from Workspace" on its Tools panel.</p>
+    <p class="empty-state">No tools in the global catalog yet. Have an agent call <code>create_tool</code>, or sync from an agent's Tools panel.</p>
     {% endif %}
 </div>
 {% endblock %}
