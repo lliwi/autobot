@@ -248,6 +248,7 @@ def register_cli(app):
         click.echo(f"  ✓ Bundle written to {report.path}")
         click.echo(f"    agents={report.agents} tools={report.tools} skills={report.skills}"
                    f" packages={report.packages} credentials={report.credentials}"
+                   f" tasks={report.scheduled_tasks} objectives={report.objectives}"
                    f" workspaces={report.workspaces}")
         if report.included_env:
             click.echo("    included .env")
@@ -282,6 +283,8 @@ def register_cli(app):
         click.echo(
             f"    packages +{report.packages_created}/±{report.packages_updated}"
             f"   credentials +{report.credentials_created}/±{report.credentials_updated}"
+            f"   tasks +{report.tasks_created}/±{report.tasks_updated}"
+            f"   objectives +{report.objectives_created}/±{report.objectives_updated}"
             f"   workspaces={report.workspaces_restored}"
         )
         if report.env_written:

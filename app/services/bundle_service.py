@@ -63,6 +63,8 @@ class ExportReport:
     skills: int = 0
     credentials: int = 0
     packages: int = 0
+    scheduled_tasks: int = 0
+    objectives: int = 0
     workspaces: int = 0
     included_env: bool = False
     included_secrets: bool = False
@@ -82,6 +84,10 @@ class ImportReport:
     credentials_updated: int = 0
     packages_created: int = 0
     packages_updated: int = 0
+    tasks_created: int = 0
+    tasks_updated: int = 0
+    objectives_created: int = 0
+    objectives_updated: int = 0
     workspaces_restored: int = 0
     env_written: bool = False
     warnings: list[str] = field(default_factory=list)
@@ -143,6 +149,21 @@ def export_bundle(
             credentials_payload.append(_serialize_credential(row))
     report.credentials = len(credentials_payload)
 
+    from app.models.scheduled_task import ScheduledTask
+    tasks = ScheduledTask.query.order_by(ScheduledTask.id.asc()).all()
+    tasks_payload = [_serialize_task(t) for t in tasks if t.agent]
+    report.scheduled_tasks = len(tasks_payload)
+
+    from app.models.objective import Objective
+    open_objs = (
+        Objective.query
+        .filter(Objective.status.in_(("active", "blocked", "waiting")))
+        .order_by(Objective.id.asc())
+        .all()
+    )
+    objectives_payload = [_serialize_objective(o) for o in open_objs if o.agent]
+    report.objectives = len(objectives_payload)
+
     manifest = {
         "schema_version": SCHEMA_VERSION,
         "exported_at": datetime.now(timezone.utc).isoformat(),
@@ -152,6 +173,8 @@ def export_bundle(
             "skills": report.skills,
             "credentials": report.credentials,
             "packages": report.packages,
+            "scheduled_tasks": report.scheduled_tasks,
+            "objectives": report.objectives,
         },
         "options": {
             "include_env": include_env,
@@ -169,6 +192,8 @@ def export_bundle(
         _add_json(tar, "skills.json", skills_payload)
         _add_json(tar, "packages.json", packages_payload)
         _add_json(tar, "credentials.json", credentials_payload)
+        _add_json(tar, "tasks.json", tasks_payload)
+        _add_json(tar, "objectives.json", objectives_payload)
 
         for agent in agents:
             ws = _resolve_workspace_path(agent)
@@ -240,6 +265,36 @@ def _serialize_skill_assignment(ags) -> dict:
         "enabled": ags.enabled,
         "manifest_json": s.manifest_json,
         "path": s.path,
+    }
+
+
+def _serialize_task(t) -> dict:
+    """Serialize a scheduled task. Runtime state (last/next run, retries) is
+    intentionally dropped — the scheduler recomputes it on the destination.
+    """
+    return {
+        "agent_slug": t.agent.slug,
+        "name": t.name,
+        "task_type": t.task_type,
+        "schedule_expr": t.schedule_expr,
+        "schedule_config": t.schedule_config,
+        "timezone": t.timezone,
+        "payload_json": t.payload_json,
+        "enabled": t.enabled,
+        "max_retries": t.max_retries,
+    }
+
+
+def _serialize_objective(o) -> dict:
+    """Serialize an open objective (active/blocked/waiting) so in-flight
+    autonomous work survives a restore. Done/cancelled ones are not exported.
+    """
+    return {
+        "agent_slug": o.agent.slug,
+        "title": o.title,
+        "description": o.description,
+        "status": o.status,
+        "context_json": o.context_json,
     }
 
 
@@ -329,6 +384,8 @@ def import_bundle(input_path: str, *, overwrite: bool = False) -> ImportReport:
         skills_payload = _load_json(tmp / "skills.json") or []
         packages_payload = _load_json(tmp / "packages.json") or []
         credentials_payload = _load_json(tmp / "credentials.json") or []
+        tasks_payload = _load_json(tmp / "tasks.json") or []
+        objectives_payload = _load_json(tmp / "objectives.json") or []
 
         slug_to_agent = _import_agents(agents_payload, tmp, overwrite, report)
 
@@ -339,6 +396,8 @@ def import_bundle(input_path: str, *, overwrite: bool = False) -> ImportReport:
         _import_skills(skills_payload, slug_to_agent, overwrite, report)
         _import_packages(packages_payload, slug_to_agent, overwrite, report)
         _import_credentials(credentials_payload, slug_to_agent, overwrite, report)
+        _import_tasks(tasks_payload, slug_to_agent, overwrite, report)
+        _import_objectives(objectives_payload, slug_to_agent, overwrite, report)
 
         # .env last so the rest of the import can't accidentally read
         # half-applied state.
@@ -551,6 +610,97 @@ def _import_tools(
             ))
         elif overwrite:
             at.enabled = bool(entry.get("enabled", True))
+
+
+def _import_tasks(
+    payload: list[dict],
+    slug_to_agent: dict[str, Agent],
+    overwrite: bool,
+    report: ImportReport,
+) -> None:
+    from app.models.scheduled_task import ScheduledTask
+
+    for entry in payload:
+        agent = slug_to_agent.get(entry.get("agent_slug"))
+        if not agent:
+            report.warnings.append(
+                f"tasks.json: skipped task {entry.get('name')!r} — agent "
+                f"'{entry.get('agent_slug')}' missing"
+            )
+            continue
+
+        # Identify an existing task by its defining fields so re-import is idempotent.
+        existing = ScheduledTask.query.filter_by(
+            agent_id=agent.id,
+            name=entry.get("name"),
+            task_type=entry.get("task_type"),
+            schedule_expr=entry.get("schedule_expr"),
+        ).first()
+        if existing and not overwrite:
+            continue
+
+        if existing:
+            existing.schedule_config = entry.get("schedule_config")
+            existing.timezone = entry.get("timezone") or "UTC"
+            existing.payload_json = entry.get("payload_json")
+            existing.enabled = bool(entry.get("enabled", True))
+            existing.max_retries = entry.get("max_retries", 3) or 3
+            report.tasks_updated += 1
+        else:
+            db.session.add(ScheduledTask(
+                agent_id=agent.id,
+                name=entry.get("name"),
+                task_type=entry.get("task_type") or "cron",
+                schedule_expr=entry.get("schedule_expr"),
+                schedule_config=entry.get("schedule_config"),
+                timezone=entry.get("timezone") or "UTC",
+                payload_json=entry.get("payload_json"),
+                enabled=bool(entry.get("enabled", True)),
+                max_retries=entry.get("max_retries", 3) or 3,
+            ))
+            report.tasks_created += 1
+
+
+def _import_objectives(
+    payload: list[dict],
+    slug_to_agent: dict[str, Agent],
+    overwrite: bool,
+    report: ImportReport,
+) -> None:
+    from app.models.objective import Objective
+
+    for entry in payload:
+        agent = slug_to_agent.get(entry.get("agent_slug"))
+        if not agent:
+            report.warnings.append(
+                f"objectives.json: skipped {entry.get('title')!r} — agent "
+                f"'{entry.get('agent_slug')}' missing"
+            )
+            continue
+
+        existing = (
+            Objective.query
+            .filter_by(agent_id=agent.id, title=entry.get("title"))
+            .filter(Objective.status.in_(("active", "blocked", "waiting")))
+            .first()
+        )
+        if existing and not overwrite:
+            continue
+
+        if existing:
+            existing.description = entry.get("description")
+            existing.status = entry.get("status") or "active"
+            existing.context_json = entry.get("context_json")
+            report.objectives_updated += 1
+        else:
+            db.session.add(Objective(
+                agent_id=agent.id,
+                title=entry.get("title"),
+                description=entry.get("description"),
+                status=entry.get("status") or "active",
+                context_json=entry.get("context_json"),
+            ))
+            report.objectives_created += 1
 
 
 def _import_skills(
