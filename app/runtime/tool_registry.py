@@ -310,6 +310,26 @@ def register_builtin_tools():
 
     register(
         ToolDefinition(
+            name="error_digest",
+            description=(
+                "Summarize your recent failures (failed tool calls and errored/stuck runs) "
+                "clustered by signature, so you can see which errors RECUR and fix the root "
+                "cause. Returns each cluster's count, a sample message and the last run id. "
+                "Recurring clusters also auto-spawn a fix objective for you to drive."
+            ),
+            parameters={
+                "type": "object",
+                "properties": {
+                    "window_hours": {"type": "integer", "description": "Look-back window in hours (default 24)."},
+                    "min_count": {"type": "integer", "description": "Only clusters seen at least this many times (default 1)."},
+                },
+            },
+            handler=lambda **kwargs: _error_digest(**kwargs),
+        )
+    )
+
+    register(
+        ToolDefinition(
             name="create_objective",
             description=(
                 "Create a long-lived OBJECTIVE: a goal you keep working on across many runs, "
@@ -1509,6 +1529,23 @@ def _revoke_tool(_agent=None, _run_id=None, tool=None, agent=None, **kwargs):
     refresh_tools_md(target)
     return {"revoked": True, "tool": t.slug, "agent": target.slug,
             "message": f"Tool '{t.slug}' removed from agent '{target.slug}'."}
+
+
+# --------------------------- Error-learning loop ---------------------------
+
+
+def _error_digest(_agent=None, _run_id=None, window_hours=24, min_count=1, **kwargs):
+    if _agent is None:
+        return {"error": "No agent context"}
+    from app.services import error_analysis_service
+
+    try:
+        window = int(window_hours or 24)
+        mc = int(min_count or 1)
+    except (TypeError, ValueError):
+        return {"error": "window_hours and min_count must be integers"}
+    clusters = error_analysis_service.error_digest(_agent.id, window_hours=window, min_count=mc)
+    return {"window_hours": window, "cluster_count": len(clusters), "clusters": clusters}
 
 
 # --------------------------- Objectives (autonomous loop) ---------------------------

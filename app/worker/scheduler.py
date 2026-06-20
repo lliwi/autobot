@@ -41,6 +41,17 @@ def init_scheduler(app):
         coalesce=True,
     )
 
+    # Scan for recurring errors and spawn fix-objectives (error-learning loop).
+    _scheduler.add_job(
+        _scan_errors,
+        trigger=IntervalTrigger(minutes=10),
+        id="__scan_errors",
+        replace_existing=True,
+        kwargs={"app": app},
+        max_instances=1,
+        coalesce=True,
+    )
+
     # Initial sync
     with app.app_context():
         _sync_jobs(app)
@@ -139,7 +150,7 @@ def _sync_jobs(app):
 
         # Remove jobs for disabled/deleted tasks. One-off drive-to-completion
         # continuation jobs (heartbeat_drive_*) are transient — leave them alone.
-        expected_ids = heartbeat_job_ids | cron_job_ids | {"__sync_jobs", "__drain_review_queue"}
+        expected_ids = heartbeat_job_ids | cron_job_ids | {"__sync_jobs", "__drain_review_queue", "__scan_errors"}
         for job in _scheduler.get_jobs():
             if job.id not in expected_ids and not job.id.startswith("heartbeat_drive_"):
                 logger.info(f"Removing stale job: {job.id}")
@@ -233,6 +244,19 @@ def _drain_review_queue(app):
                 logger.info("review-queue drained %d event(s)", n)
         except Exception:
             logger.exception("review-queue drain failed")
+
+
+def _scan_errors(app):
+    """Detect recurring error clusters and spawn fix-objectives for each agent."""
+    with app.app_context():
+        from app.services import error_analysis_service
+
+        try:
+            n = error_analysis_service.scan_all_active_agents()
+            if n:
+                logger.info("error-loop: spawned %d fix objective(s)", n)
+        except Exception:
+            logger.exception("error-loop scan failed")
 
 
 def _execute_cron_task(app, task_id):
