@@ -2,9 +2,14 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# System deps — separate layer so it only rebuilds when this RUN changes
+# Runtime system deps only. We deliberately do NOT install a compiler or -dev
+# headers:
+#   - psycopg2-binary bundles libpq          → no libpq-dev
+#   - matrix-nio is used without [e2e]/olm   → no libolm-dev
+#   - all Python deps ship manylinux wheels  → no gcc at build time
+# git is kept because the app shells out to it for promotion PRs and bundles.
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    gcc libpq-dev libolm-dev git && \
+    git ca-certificates && \
     rm -rf /var/lib/apt/lists/* && \
     git config --global --add safe.directory /app
 
@@ -14,7 +19,9 @@ COPY pyproject.toml .
 RUN mkdir -p app && touch app/__init__.py && \
     pip install --no-cache-dir -e ".[dev]"
 
-# Source — copied last; changes here don't invalidate the layers above
+# Source — copied last; changes here don't invalidate the layers above. At
+# runtime docker-compose bind-mounts the project over /app, so this mainly keeps
+# the image self-contained when run without the mount.
 COPY . .
 
 ENV FLASK_APP=wsgi.py
