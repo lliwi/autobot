@@ -137,10 +137,11 @@ def _sync_jobs(app):
                 except ValueError as e:
                     logger.error(f"Invalid cron expression for task {task.id}: {e}")
 
-        # Remove jobs for disabled/deleted tasks
+        # Remove jobs for disabled/deleted tasks. One-off drive-to-completion
+        # continuation jobs (heartbeat_drive_*) are transient — leave them alone.
         expected_ids = heartbeat_job_ids | cron_job_ids | {"__sync_jobs", "__drain_review_queue"}
         for job in _scheduler.get_jobs():
-            if job.id not in expected_ids:
+            if job.id not in expected_ids and not job.id.startswith("heartbeat_drive_"):
                 logger.info(f"Removing stale job: {job.id}")
                 job.remove()
                 _job_signatures.pop(job.id, None)
@@ -171,23 +172,52 @@ def _ensure_job(job_id, func, trigger, kwargs, signature):
     _job_signatures[job_id] = signature
 
 
-def _execute_heartbeat(app, agent_id):
+def _execute_heartbeat(app, agent_id, drive=False):
     """Run one supervisor tick for an agent.
 
     Delegates to ``heartbeat_supervisor.tick`` which builds a snapshot,
-    decides (skip/defer/act) and records a HeartbeatEvent.
+    decides (skip/defer/act) and records a HeartbeatEvent. When the tick signals
+    ``drive_again`` (an objective made progress and is still active), schedule a
+    quick continuation tick so the loop drives the objective to completion
+    instead of waiting for the next ambient interval.
     """
     with app.app_context():
         from app.services import heartbeat_supervisor
 
         try:
-            event = heartbeat_supervisor.tick(agent_id)
+            event = heartbeat_supervisor.tick(agent_id, drive=drive)
             logger.info(
-                "heartbeat agent=%s decision=%s reason=%s run=%s",
-                agent_id, event.decision, event.reason, event.run_id,
+                "heartbeat agent=%s decision=%s reason=%s run=%s drive=%s",
+                agent_id, event.decision, event.reason, event.run_id, drive,
             )
+            if (event.snapshot_json or {}).get("drive_again"):
+                _schedule_drive_followup(app, agent_id)
         except Exception as e:
             logger.exception(f"Heartbeat tick failed for agent {agent_id}: {e}")
+
+
+def _schedule_drive_followup(app, agent_id):
+    """Schedule a one-off drive continuation tick a few seconds out."""
+    from datetime import datetime, timedelta, timezone
+
+    from apscheduler.triggers.date import DateTrigger
+
+    from app.services import heartbeat_supervisor
+
+    if _scheduler is None:
+        return
+    run_at = datetime.now(timezone.utc) + timedelta(
+        seconds=heartbeat_supervisor.DRIVE_FOLLOWUP_SECONDS
+    )
+    _scheduler.add_job(
+        _execute_heartbeat,
+        trigger=DateTrigger(run_date=run_at),
+        id=f"heartbeat_drive_{agent_id}",
+        replace_existing=True,
+        kwargs={"app": app, "agent_id": agent_id, "drive": True},
+        max_instances=1,
+        coalesce=True,
+    )
 
 
 def _drain_review_queue(app):

@@ -42,24 +42,35 @@ RECENT_EVENT_WINDOW = 8
 MAX_NO_PROGRESS_BEFORE_BLOCK = 3
 # Exponential backoff cap for per-objective next_check_at pushes.
 MAX_OBJECTIVE_BACKOFF_SECONDS = 3600
+# Phase 3 — drive-to-completion: when an act makes progress on an active
+# objective, re-tick quickly instead of waiting for the next ambient interval.
+DRIVE_FOLLOWUP_SECONDS = 8
+# Hard cap on consecutive drive ticks per objective so a "productive" loop can't
+# run forever. Resets when the objective leaves active or a user interacts.
+DRIVE_MAX_ITERATIONS = 10
 
 _INTERVAL_UNITS = {"s": 1, "m": 60, "h": 3600, "d": 86400}
 
 
-def tick(agent_id: int) -> HeartbeatEvent:
+def tick(agent_id: int, drive: bool = False) -> HeartbeatEvent:
     """Run one supervisor tick for an agent. Returns the recorded event.
 
-    Must be called inside an app context.
+    When ``drive`` is True this is a drive-to-completion continuation tick: the
+    act-cooldown and same-signature backoff are bypassed so a productive
+    objective keeps advancing. Must be called inside an app context.
     """
     agent = db.session.get(Agent, agent_id)
     if agent is None:
         raise ValueError(f"Agent {agent_id} not found")
 
     snapshot = _build_snapshot(agent)
-    decision, reason, run_id = _decide_and_maybe_act(agent, snapshot)
+    decision, reason, run_id = _decide_and_maybe_act(agent, snapshot, drive=drive)
 
+    drive_again = False
     if decision == "act":
-        _post_act_bookkeeping(agent, snapshot, run_id)
+        progressed_ids = _post_act_bookkeeping(agent, snapshot, run_id)
+        drive_again = _should_drive(progressed_ids)
+    snapshot["drive_again"] = drive_again
 
     event = HeartbeatEvent(
         agent_id=agent.id,
@@ -225,7 +236,7 @@ def _signature(snapshot: dict) -> str:
 # --------------------------- decision ---------------------------
 
 
-def _decide_and_maybe_act(agent: Agent, snapshot: dict) -> tuple[str, str, int | None]:
+def _decide_and_maybe_act(agent: Agent, snapshot: dict, drive: bool = False) -> tuple[str, str, int | None]:
     now = datetime.fromisoformat(snapshot["now"])
 
     live_tasks = [t for t in snapshot["heartbeat_tasks"] if not t["done"] and t["text"]]
@@ -238,29 +249,32 @@ def _decide_and_maybe_act(agent: Agent, snapshot: dict) -> tuple[str, str, int |
     last_act = snapshot.get("last_act_at")
     last_act_dt = datetime.fromisoformat(last_act) if last_act else None
 
-    if last_act_dt is not None:
-        elapsed = (now - last_act_dt).total_seconds()
-        if elapsed < ACT_COOLDOWN_SECONDS:
-            return "defer", f"cooldown active ({int(elapsed)}s < {ACT_COOLDOWN_SECONDS}s)", None
-
-    # Phase B: same signature twice in a row without success → stretched cooldown.
-    current_sig = snapshot["signature"]
-    prior_acts = [e for e in snapshot["recent_events"] if e["decision"] == "act"]
-    if prior_acts and last_act_dt is not None:
-        same_sig_acts = [e for e in prior_acts if e.get("signature") == current_sig]
-        unproductive = [
-            e for e in same_sig_acts
-            if e.get("run_status") in (None, "error", "stuck")
-        ]
-        if len(unproductive) >= 2:
+    # Drive-to-completion continuation bypasses the ambient cooldown/backoff —
+    # we WANT to keep advancing a productive objective.
+    if not drive:
+        if last_act_dt is not None:
             elapsed = (now - last_act_dt).total_seconds()
-            if elapsed < REPEAT_DEFER_COOLDOWN:
-                return (
-                    "defer",
-                    f"signature unchanged for {len(unproductive)} unproductive acts "
-                    f"({int(elapsed)}s < {REPEAT_DEFER_COOLDOWN}s backoff)",
-                    None,
-                )
+            if elapsed < ACT_COOLDOWN_SECONDS:
+                return "defer", f"cooldown active ({int(elapsed)}s < {ACT_COOLDOWN_SECONDS}s)", None
+
+        # Phase B: same signature twice in a row without success → stretched cooldown.
+        current_sig = snapshot["signature"]
+        prior_acts = [e for e in snapshot["recent_events"] if e["decision"] == "act"]
+        if prior_acts and last_act_dt is not None:
+            same_sig_acts = [e for e in prior_acts if e.get("signature") == current_sig]
+            unproductive = [
+                e for e in same_sig_acts
+                if e.get("run_status") in (None, "error", "stuck")
+            ]
+            if len(unproductive) >= 2:
+                elapsed = (now - last_act_dt).total_seconds()
+                if elapsed < REPEAT_DEFER_COOLDOWN:
+                    return (
+                        "defer",
+                        f"signature unchanged for {len(unproductive)} unproductive acts "
+                        f"({int(elapsed)}s < {REPEAT_DEFER_COOLDOWN}s backoff)",
+                        None,
+                    )
 
     live_run = Run.query.filter_by(agent_id=agent.id, status="running").first()
     if live_run is not None:
@@ -311,16 +325,15 @@ def _mark_runs_stuck(run_ids: list[int]) -> None:
 # --------------------------- post-act bookkeeping ---------------------------
 
 
-def _post_act_bookkeeping(agent: Agent, snapshot: dict, run_id: int | None) -> None:
+def _post_act_bookkeeping(agent: Agent, snapshot: dict, run_id: int | None) -> list[int]:
     """After an act-run, update per-objective no-progress counters.
 
-    Compares each objective's pre-act `last_progress_at` (captured in the
-    snapshot) to the current value. If unchanged, bump the counter stored in
-    `context_json['heartbeat_no_progress']` and push `next_check_at` out
-    exponentially. When the counter crosses MAX_NO_PROGRESS_BEFORE_BLOCK, the
-    objective is marked `blocked` so it stops firing until a human intervenes.
+    Returns the ids of active objectives that *advanced* this tick (used to
+    decide drive-to-completion). Auto-blocks objectives stuck without progress
+    and escalates that to the user.
     """
     now = datetime.now(timezone.utc)
+    progressed: list[int] = []
     for entry in snapshot.get("objectives", []):
         if entry.get("status") != "active" or not entry.get("due"):
             continue
@@ -334,14 +347,17 @@ def _post_act_bookkeeping(agent: Agent, snapshot: dict, run_id: int | None) -> N
         if post_progress and post_progress != pre_progress:
             ctx["heartbeat_no_progress"] = 0
             ctx.pop("heartbeat_last_backoff_seconds", None)
+            if obj.status == "active":
+                progressed.append(obj.id)
         else:
             counter = int(ctx.get("heartbeat_no_progress", 0)) + 1
             ctx["heartbeat_no_progress"] = counter
             if counter >= MAX_NO_PROGRESS_BEFORE_BLOCK:
                 obj.status = "blocked"
-                ctx["heartbeat_block_reason"] = (
-                    f"No progress after {counter} consecutive supervisor acts"
-                )
+                reason = f"No progress after {counter} consecutive supervisor acts"
+                ctx["heartbeat_block_reason"] = reason
+                ctx["drive_iterations"] = 0
+                _escalate_blocked(agent, obj, reason)
             else:
                 backoff = min(
                     ACT_COOLDOWN_SECONDS * (2 ** counter),
@@ -351,6 +367,44 @@ def _post_act_bookkeeping(agent: Agent, snapshot: dict, run_id: int | None) -> N
                 obj.next_check_at = now + timedelta(seconds=backoff)
         obj.context_json = ctx
     db.session.commit()
+    return progressed
+
+
+def _escalate_blocked(agent: Agent, obj: Objective, reason: str) -> None:
+    """Phase 5 — notify the user when the supervisor auto-blocks an objective."""
+    try:
+        from app.services.objective_service import notify_user
+        notify_user(agent, f"⚠️ Objetivo BLOQUEADO automáticamente: {obj.title}\n{reason}")
+    except Exception:
+        logger.exception("escalate_blocked notify failed for objective %s", obj.id)
+
+
+def _should_drive(progressed_ids: list[int]) -> bool:
+    """Phase 3 — decide whether to schedule an immediate continuation tick.
+
+    Drives while at least one active objective made progress this tick and is
+    still under its per-objective drive-iteration budget. Bumps the budget.
+    """
+    if not progressed_ids:
+        return False
+    now = datetime.now(timezone.utc)
+    drive = False
+    for oid in progressed_ids:
+        obj = db.session.get(Objective, oid)
+        if obj is None or obj.status != "active":
+            continue
+        ctx = dict(obj.context_json or {})
+        iters = int(ctx.get("drive_iterations", 0))
+        if iters >= DRIVE_MAX_ITERATIONS:
+            ctx["drive_iterations"] = 0  # reset for the next ambient cycle
+            obj.context_json = ctx
+            continue
+        ctx["drive_iterations"] = iters + 1
+        obj.context_json = ctx
+        obj.next_check_at = now  # due immediately for the continuation tick
+        drive = True
+    db.session.commit()
+    return drive
 
 
 # --------------------------- prompt ---------------------------
@@ -369,6 +423,15 @@ def _build_prompt(agent: Agent, snapshot: dict, live_tasks, due_objectives, stuc
             if o.get("no_progress_count"):
                 hint = f" [no_progress={o['no_progress_count']}]"
             parts.append(f"  - [{o['id']}] {o['title']} (status={o['status']}){hint}")
+            obj = db.session.get(Objective, o["id"])
+            ctx = (obj.context_json or {}) if obj else {}
+            plan = ctx.get("plan") or []
+            if plan:
+                cur = ctx.get("current_step")
+                for idx, step in enumerate(plan):
+                    mark = "→" if idx == cur else ("✓" if step.get("status") == "done"
+                                                   else ("✗" if step.get("status") == "failed" else " "))
+                    parts.append(f"      {mark} {idx}. {step.get('step')}")
     if stuck_run_ids:
         parts.append(f"\nStuck runs (flagged): {stuck_run_ids}")
 
@@ -389,7 +452,12 @@ def _build_prompt(agent: Agent, snapshot: dict, live_tasks, due_objectives, stuc
         "\nInstructions:"
         "\n- Act on items that actually need attention now; skip the rest."
         "\n- If a recent tick already handled an item, do NOT redo it — update MEMORY.md and move on."
-        "\n- For objectives with no_progress > 0, decide if you can unblock them or mark them done/blocked."
+        "\n- For each objective: do the NEXT concrete step, then call `objective_progress` "
+        "(with advance_step=true if it has a plan) so the loop knows it advanced and keeps driving."
+        "\n- When an objective is truly finished, call `complete_objective` with real `evidence` "
+        "(tests run / output verified). Never mark done without verification."
+        "\n- If you need user input/approval or hit an external dependency, call `update_objective` "
+        "with status='waiting' or 'blocked' (this notifies the user) instead of looping uselessly."
         "\n- Be concise. Only report back if the outcome is useful to the user."
         "\n- Update MEMORY.md with any durable finding."
     )
