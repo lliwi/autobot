@@ -1,3 +1,4 @@
+import hashlib
 import json
 
 from flask import current_app
@@ -72,6 +73,23 @@ _ENFORCE_ACTION_NUDGE = (
     " `list_credentials` to verify before telling the user it's missing."
 )
 
+# No-progress guardrails. Beyond the exact-repeat detector (same tool + same
+# args), we watch for runs that keep failing or keep getting the same result
+# even with *different* args — the "chaining tool calls without converging"
+# pattern that otherwise burns every round up to the hard cap.
+_FAILED_STREAK_NUDGE = 3   # consecutive failed tool calls → nudge once
+_FAILED_STREAK_ABORT = 6   # consecutive failed tool calls → abort the run
+_RESULT_REPEAT_ABORT = 4   # identical result content seen this many times → abort
+
+_LOOP_BREAK_NUDGE = (
+    "SYSTEM: Your recent tool calls keep failing or returning the same result"
+    " without progress. Stop retrying the same approach. Either (a) change"
+    " strategy with a genuinely different tool or parameters, (b) if a tool or"
+    " credential is missing, say so plainly and stop, or (c) summarize what you"
+    " already have and report the blocker to the user. Do NOT repeat the failing"
+    " call."
+)
+
 
 def _trim_inloop_messages(messages: list, budget: int, fixed_len: int) -> list:
     """Drop oldest agentic round pairs to keep the running context under budget.
@@ -137,6 +155,9 @@ def run(agent, session, user_message, run_id):
     )
     usage_total = {"input_tokens": 0, "output_tokens": 0, "budget": budget}
     repeat_signatures: dict[str, int] = {}
+    result_repeat: dict[str, int] = {}
+    error_streak = 0
+    loop_break_nudge_used = False
     user_wants_action = is_task_like(user_message)
     action_nudge_used = False
 
@@ -280,11 +301,44 @@ def run(agent, session, user_message, run_id):
                 # Append tool result to messages for next model call. Oversized
                 # results are capped so one fat response doesn't blow the budget;
                 # the full result stays persisted in ``tool_executions``.
+                capped = _cap_tool_result_content(result)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc["id"],
-                    "content": _cap_tool_result_content(result),
+                    "content": capped,
                 })
+
+                # No-progress detection: error streaks and repeated identical
+                # results catch non-converging loops that vary their arguments
+                # (which the exact-repeat guard above misses).
+                error_streak = error_streak + 1 if last_tool_status == "error" else 0
+                rhash = hashlib.md5(capped.encode("utf-8", "ignore")).hexdigest()
+                result_repeat[rhash] = result_repeat.get(rhash, 0) + 1
+
+                if error_streak >= _FAILED_STREAK_ABORT:
+                    yield json.dumps({
+                        "type": "error",
+                        "data": (
+                            f"Aborted: {error_streak} consecutive tool calls failed without"
+                            " progress — stopping to avoid a runaway loop."
+                        ),
+                    })
+                    return
+                if result_repeat[rhash] >= _RESULT_REPEAT_ABORT:
+                    yield json.dumps({
+                        "type": "error",
+                        "data": (
+                            f"Aborted: the same tool result was returned {result_repeat[rhash]}"
+                            " times without progress."
+                        ),
+                    })
+                    return
+
+            # End of the round's tool calls: if the agent is on a failing streak
+            # but not yet at the abort threshold, nudge it once to change tack.
+            if error_streak >= _FAILED_STREAK_NUDGE and not loop_break_nudge_used:
+                loop_break_nudge_used = True
+                messages.append({"role": "system", "content": _LOOP_BREAK_NUDGE})
 
         # Hit the hard round cap. Rather than dropping the task on the floor,
         # give the model one final no-tool turn to synthesize a partial answer
