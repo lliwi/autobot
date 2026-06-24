@@ -103,6 +103,13 @@ input:focus, textarea:focus, select:focus {
     border-color: var(--blue);
     box-shadow: 0 0 0 1px var(--blue);
 }
+select {
+    background: var(--bg-raised);
+}
+select option {
+    background: var(--bg-raised);
+    color: var(--fg);
+}
 
 /* ---------- Shell layout ---------- */
 .app, .layout {
