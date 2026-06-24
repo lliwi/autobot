@@ -10,10 +10,17 @@ import shutil
 import tempfile
 
 import pytest
+from cryptography.fernet import Fernet
 
 os.environ.setdefault("FLASK_ENV", "testing")
-os.environ.setdefault("TOKEN_ENCRYPTION_KEY", "")
 os.environ.setdefault("DATABASE_URL", "sqlite:///:memory:")
+# Credential encryption needs a valid Fernet key. Keep the suite self-contained:
+# generate an ephemeral key when the environment doesn't supply a usable one.
+# An empty string counts as missing (CI exports TOKEN_ENCRYPTION_KEY="") — these
+# env vars must be set before ``app.config`` is imported below, since Config
+# reads them at class-definition time.
+if not os.environ.get("TOKEN_ENCRYPTION_KEY"):
+    os.environ["TOKEN_ENCRYPTION_KEY"] = Fernet.generate_key().decode()
 
 from app import create_app  # noqa: E402
 from app import models as _models  # noqa: E402,F401 — registers ORM classes

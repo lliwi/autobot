@@ -34,8 +34,9 @@ jobs:
       - name: Run tests
         # The suite runs entirely on SQLite in-memory (see tests/conftest.py),
         # so no Postgres/Redis services are required.
+        # conftest.py generates an ephemeral TOKEN_ENCRYPTION_KEY when none is
+        # provided, so credential tests are self-contained here.
         env:
           FLASK_ENV: testing
           DATABASE_URL: "sqlite:///:memory:"
-          TOKEN_ENCRYPTION_KEY: ""
         run: pytest -q
