@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}Incident #{{ incident.id }} - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Incident #{{ incident.id }}
+        <span class="badge badge-{{ 'error' if incident.severity == 'critical' else 'warning' }}">{{ incident.severity }}</span>
+        <span class="badge badge-{{ 'active' if incident.status == 'approved' else 'warning' if incident.status == 'awaiting_approval' else 'inactive' if incident.status in ('dismissed','failed') else 'info' }}">{{ incident.status }}</span>
+    </h1>
+    <a href="{{ url_for('dashboard.incidents_list') }}" class="btn btn-sm">← Back</a>
+</div>
+
+<div class="card" style="margin-bottom:1rem;">
+    <h3>{{ incident.title }}</h3>
+    <p class="meta">
+        Source <code>{{ incident.source or '-' }}</code>
+        · {{ incident.occurrences }} occurrence(s)
+        · created {{ incident.created_at | localtz }}
+        {% if incident.agent %}· agent {{ incident.agent.name }}{% endif %}
+    </p>
+    {% if incident.message %}
+    <h4>Error</h4>
+    <pre style="white-space:pre-wrap;word-break:break-word;">{{ incident.message }}</pre>
+    {% endif %}
+    {% if incident.traceback %}
+    <details>
+        <summary>Traceback</summary>
+        <pre style="white-space:pre-wrap;word-break:break-word;">{{ incident.traceback }}</pre>
+    </details>
+    {% endif %}
+</div>
+
+{% if incident.diagnosis %}
+<div class="card" style="margin-bottom:1rem;">
+    <h3>Diagnosis</h3>
+    <p style="white-space:pre-wrap;">{{ incident.diagnosis }}</p>
+</div>
+{% endif %}
+
+{% if incident.proposed_action %}
+<div class="card" style="margin-bottom:1rem;">
+    <h3>Proposed: open a <code>{{ incident.proposed_action }}</code></h3>
+    {% if incident.proposed_title %}<p><strong>{{ incident.proposed_title }}</strong></p>{% endif %}
+    {% if incident.proposed_body %}<pre style="white-space:pre-wrap;word-break:break-word;">{{ incident.proposed_body }}</pre>{% endif %}
+    {% if incident.proposed_patch_json %}
+    <h4>Patch → <code>{{ incident.proposed_patch_json.target_path }}</code></h4>
+    <pre style="white-space:pre-wrap;word-break:break-word;max-height:400px;overflow:auto;">{{ incident.proposed_patch_json.new_content }}</pre>
+    {% endif %}
+
+    {% if incident.status == 'awaiting_approval' %}
+    <div style="display:flex;gap:0.5rem;margin-top:1rem;">
+        <form method="POST" action="{{ url_for('dashboard.incident_approve', incident_id=incident.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <button type="submit" class="btn btn-primary">Approve &amp; open on GitHub</button>
+        </form>
+        <form method="POST" action="{{ url_for('dashboard.incident_dismiss', incident_id=incident.id) }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="text" name="note" placeholder="reason (optional)" class="form-control" style="max-width:240px;display:inline-block;">
+            <button type="submit" class="btn">Dismiss</button>
+        </form>
+    </div>
+    {% endif %}
+</div>
+{% endif %}
+
+{% if incident.github_url %}
+<div class="card">
+    <p>✅ Opened on GitHub: <a href="{{ incident.github_url }}" target="_blank" rel="noopener">{{ incident.github_url }}</a></p>
+    {% if incident.resolution_note %}<p class="meta">{{ incident.resolution_note }}</p>{% endif %}
+</div>
+{% elif incident.resolution_note %}
+<div class="card"><p class="meta">{{ incident.resolution_note }}</p></div>
+{% endif %}
+{% endblock %}

@@ -68,6 +68,82 @@ class RedisRingHandler(logging.Handler):
             pass
 
 
+class IncidentLogHandler(logging.Handler):
+    """Raise an incident on ERROR/CRITICAL records (incident autopilot).
+
+    Self-contained on purpose: it reads ``INCIDENT_*`` / ``REDIS_URL`` from the
+    environment and pushes a deduplicated payload straight to Redis, so it works
+    in any thread/process with or without a Flask app context. The worker drains
+    the queue and runs diagnosis (see ``incident_service``). Anything that can go
+    wrong here is swallowed — logging must never break the app, least of all the
+    handler that reacts to errors.
+    """
+
+    def __init__(self, redis_url: str, process: str):
+        super().__init__(level=logging.ERROR)
+        self._process = process
+        self._redis = None
+        self._ignore = tuple(
+            p.strip() for p in os.environ.get(
+                "INCIDENT_IGNORE_LOGGERS",
+                "app.services.incident_service,app.services.github_service,app.services.review_queue_service",
+            ).split(",") if p.strip()
+        )
+        self._min_critical = os.environ.get("INCIDENT_MIN_SEVERITY", "error").lower() == "critical"
+        self._cooldown_h = int(os.environ.get("INCIDENT_DEDUP_COOLDOWN_HOURS", "12") or 12)
+        try:
+            import redis
+            self._redis = redis.Redis.from_url(redis_url, socket_timeout=0.5, decode_responses=True)
+        except Exception:
+            self._redis = None
+
+    def emit(self, record):
+        if self._redis is None:
+            return
+        try:
+            if self._min_critical and record.levelno < logging.CRITICAL:
+                return
+            if record.name and any(record.name.startswith(p) for p in self._ignore):
+                return
+
+            from app.services.incident_service import (
+                REDIS_QUEUE_KEY, _REDIS_DEDUP_PREFIX, signature_for,
+            )
+            import json as _json
+
+            message = record.getMessage()
+            tb = self.format(record) if (record.exc_info and record.exc_info[0]) else None
+            severity = "critical" if record.levelno >= logging.CRITICAL else "error"
+            sig = signature_for(message, record.name)
+            # NX dedup: at most one enqueue per signature per cooldown window.
+            if not self._redis.set(_REDIS_DEDUP_PREFIX + sig, "1", nx=True, ex=self._cooldown_h * 3600):
+                return
+            payload = _json.dumps({
+                "severity": severity,
+                "source": record.name,
+                "title": message[:300],
+                "message": message[:8000],
+                "traceback": (tb or "")[:16000],
+                "agent_id": None,
+                "signature": sig,
+            })
+            self._redis.lpush(REDIS_QUEUE_KEY, payload)
+        except Exception:
+            pass  # never raise from a log handler
+
+
+def _incident_autopilot_on() -> bool:
+    return os.environ.get("INCIDENT_AUTOPILOT_ENABLED", "true").lower() in ("1", "true", "yes")
+
+
+def _attach_incident_handler(logger_obj, redis_url: str, process: str):
+    if not (redis_url and _incident_autopilot_on()):
+        return
+    if any(isinstance(h, IncidentLogHandler) for h in logger_obj.handlers):
+        return
+    logger_obj.addHandler(IncidentLogHandler(redis_url, process=process))
+
+
 def _attach_common_handlers(logger_obj, level, redis_url: str, process: str):
     """Attach the shared stdout+Redis handlers to ``logger_obj``.
 
@@ -99,6 +175,9 @@ def configure_logging(app):
     if redis_url and not any(isinstance(h, RedisRingHandler) for h in root.handlers):
         root.addHandler(RedisRingHandler(redis_url, process="web", level=log_level))
 
+    # Incident autopilot: react to ERROR/CRITICAL across all loggers.
+    _attach_incident_handler(root, redis_url, process="web")
+
     logging.getLogger("werkzeug").setLevel(logging.WARNING)
 
 
@@ -114,3 +193,6 @@ def configure_worker_logging(process: str = "worker", log_level: str = "INFO"):
     # basicConfig already added a stdout handler; just attach the Redis one.
     if redis_url and not any(isinstance(h, RedisRingHandler) for h in root.handlers):
         root.addHandler(RedisRingHandler(redis_url, process=process, level=log_level))
+
+    # Incident autopilot: react to ERROR/CRITICAL across all loggers.
+    _attach_incident_handler(root, redis_url, process=process)

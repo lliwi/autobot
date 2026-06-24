@@ -91,4 +91,23 @@ def finish_run(run_id, status="completed", input_tokens=None, output_tokens=None
                 "Failed to enqueue run_failed review event for run %s", run_id
             )
 
+        # Incident autopilot: a failed run is a first-class incident. Deduped by
+        # signature in incident_service; drafts a GitHub Issue/PR for approval.
+        if current_app.config.get("INCIDENT_AUTOPILOT_ENABLED", True):
+            try:
+                from app.services import incident_service
+
+                incident_service.ingest(
+                    severity="error",
+                    source=f"run:{run.id}",
+                    title=f"Run #{run.id} failed ({run.trigger_type})",
+                    message=run.error_summary or "(no error summary)",
+                    agent_id=run.agent_id,
+                )
+            except Exception:
+                import logging
+                logging.getLogger(__name__).exception(
+                    "Failed to raise incident for failed run %s", run_id
+                )
+
     return run

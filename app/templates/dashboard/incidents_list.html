@@ -1,0 +1,80 @@
+{% extends "base.html" %}
+
+{% block title %}Incidents - Autobot{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>Incidents</h1>
+</div>
+
+<p class="empty-state" style="margin-bottom:1rem;">
+    Auto-detected ERROR/CRITICAL events and failed runs. A reviewer agent drafts a
+    diagnosis and a GitHub Issue or PR; nothing is opened until you approve it here.
+    {% if pending_count %}<strong>{{ pending_count }} awaiting action.</strong>{% endif %}
+</p>
+
+<div class="filters" style="margin-bottom: 1rem;">
+    <form method="GET" style="display: flex; gap: 0.5rem; align-items: center;">
+        <select name="status" class="form-control" style="max-width: 220px;">
+            <option value="">All</option>
+            <option value="pending" {% if filter_status == 'pending' %}selected{% endif %}>Open (needs action)</option>
+            {% for s in ['new', 'diagnosing', 'awaiting_approval', 'approved', 'dismissed', 'failed'] %}
+            <option value="{{ s }}" {% if filter_status == s %}selected{% endif %}>{{ s }}</option>
+            {% endfor %}
+        </select>
+        <button type="submit" class="btn btn-sm">Filter</button>
+    </form>
+</div>
+
+{% if incidents %}
+<table class="table">
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Severity</th>
+            <th>Title</th>
+            <th>Source</th>
+            <th>Status</th>
+            <th>Proposal</th>
+            <th>×</th>
+            <th>Created</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for inc in incidents %}
+        <tr>
+            <td>{{ inc.id }}</td>
+            <td><span class="badge badge-{{ 'error' if inc.severity == 'critical' else 'warning' }}">{{ inc.severity }}</span></td>
+            <td><a href="{{ url_for('dashboard.incident_detail', incident_id=inc.id) }}">{{ inc.title[:80] }}</a></td>
+            <td><code>{{ inc.source or '-' }}</code></td>
+            <td>
+                <span class="badge badge-{{ 'active' if inc.status == 'approved' else 'warning' if inc.status == 'awaiting_approval' else 'inactive' if inc.status in ('dismissed','failed') else 'info' }}">
+                    {{ inc.status }}
+                </span>
+            </td>
+            <td>{% if inc.proposed_action %}<code>{{ inc.proposed_action }}</code>{% else %}—{% endif %}</td>
+            <td>{{ inc.occurrences }}</td>
+            <td>{{ inc.created_at | localtz }}</td>
+            <td>
+                {% if inc.status == 'awaiting_approval' %}
+                <form method="POST" action="{{ url_for('dashboard.incident_approve', incident_id=inc.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm btn-primary">Approve &amp; open</button>
+                </form>
+                <form method="POST" action="{{ url_for('dashboard.incident_dismiss', incident_id=inc.id) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-sm">Dismiss</button>
+                </form>
+                {% elif inc.github_url %}
+                <a class="btn btn-sm" href="{{ inc.github_url }}" target="_blank" rel="noopener">View</a>
+                {% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% else %}
+<p class="empty-state">No incidents recorded. They appear automatically when an ERROR/CRITICAL is logged or a run fails.</p>
+{% endif %}
+{% endblock %}

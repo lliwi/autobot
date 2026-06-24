@@ -98,6 +98,16 @@ Security levels gate what agents can self-modify:
 
 All proposals go through `patch_service` → `patch_validator` (JSON/AST/handler/smoke-import checks) → optional `review_service` (sub-agent reviewer) → `apply_patch` / `rollback_patch`.
 
+## Incident Autopilot
+
+When an `ERROR`/`CRITICAL` log record is emitted (any process) or a `Run` finishes with `status=error`, an incident is raised and processed automatically: **detect → diagnose → draft Issue/PR → human approval → open on GitHub**.
+
+- **Detect**: `IncidentLogHandler` (in `logging_config.py`, attached to the root logger) and `run_service.finish_run` call `incident_service.ingest`. Self-contained handler pushes a deduplicated payload to a Redis queue (`autobot:incidents:queue`); `signature_for()` (via `error_analysis_service.normalize_error`) collapses variable parts so floods of the same error raise **one** incident. `INCIDENT_IGNORE_LOGGERS` prevents feedback loops.
+- **Diagnose**: the worker's `_drain_incidents` job (every 20 s) calls `incident_service.drain_queue` → creates `IncidentReport` rows (DB-level dedup within `INCIDENT_DEDUP_COOLDOWN_HOURS`) → `process_new` asks a reviewer agent for a root-cause diagnosis and a remediation (`issue` | `pr` | `none`).
+- **Approve**: the draft sits in `awaiting_approval`. Nothing reaches GitHub until a human approves it in the **Incidents** dashboard (`/incidents`). On approval, `github_service` opens an Issue or a single-file PR (branch+commit+PR entirely via the REST contents API — no local checkout).
+
+Config: `INCIDENT_AUTOPILOT_ENABLED` (default on), `INCIDENT_MIN_SEVERITY` (`error`|`critical`; WARNING never triggers), `INCIDENT_DEDUP_COOLDOWN_HOURS`. GitHub needs `GH_TOKEN`/`GITHUB_TOKEN` + `AUTOBOT_GITHUB_REPO`.
+
 ## DB Models (key relationships)
 
 ```
@@ -107,6 +117,7 @@ Agent ──< Session ──< Message
 Agent ──< Run ──< ToolExecution
 Agent ──< PatchProposal
 Agent ──< ScheduledTask
+Agent ──< IncidentReport   (nullable agent_id: system-wide incidents)
 ```
 
 `Skill` rows are synced from `_global/skills/` via `sync_global_skills_to_db()`. `Tool` rows are synced from `_global/tools/` via `sync_global_tools_to_db()`; passing an `agent` also creates `AgentTool` rows so that agent gets access.

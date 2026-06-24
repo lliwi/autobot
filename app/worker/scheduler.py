@@ -52,6 +52,17 @@ def init_scheduler(app):
         coalesce=True,
     )
 
+    # Incident autopilot: persist queued ERROR/CRITICAL detections and diagnose.
+    _scheduler.add_job(
+        _drain_incidents,
+        trigger=IntervalTrigger(seconds=20),
+        id="__drain_incidents",
+        replace_existing=True,
+        kwargs={"app": app},
+        max_instances=1,
+        coalesce=True,
+    )
+
     # Initial sync
     with app.app_context():
         _sync_jobs(app)
@@ -257,6 +268,25 @@ def _scan_errors(app):
                 logger.info("error-loop: spawned %d fix objective(s)", n)
         except Exception:
             logger.exception("error-loop scan failed")
+
+
+def _drain_incidents(app):
+    """Persist queued ERROR/CRITICAL detections and run reviewer diagnosis.
+
+    Each diagnosis is a Codex round-trip, so cap the batch to keep the worker
+    responsive; remaining items are picked up on the next tick.
+    """
+    if not app.config.get("INCIDENT_AUTOPILOT_ENABLED", True):
+        return
+    with app.app_context():
+        from app.services import incident_service
+
+        try:
+            n = incident_service.drain_queue(max_items=5)
+            if n:
+                logger.info("incident autopilot: diagnosed %d incident(s)", n)
+        except Exception:
+            logger.exception("incident drain failed")
 
 
 def _execute_cron_task(app, task_id):

@@ -56,11 +56,15 @@ echo "→ Applying database migrations (flask db upgrade)…"
 docker compose run --rm --no-deps web flask db upgrade
 
 echo "→ Starting web + worker…"
+# --force-recreate so web/worker always restart on the new code: handlers and
+# scheduler jobs (e.g. the incident-autopilot log handler and drain loop) are
+# wired at process start, so a stale container would silently skip them even
+# when the mounted volume already has the new code.
 if [[ "$KALI_OK" == "1" ]]; then
-  docker compose up -d web worker kali
+  docker compose up -d --force-recreate web worker kali
 else
   # --no-deps skips the (unbuilt) kali dependency; postgres/redis are already up.
-  docker compose up -d --no-deps web worker
+  docker compose up -d --no-deps --force-recreate web worker
 fi
 
 echo

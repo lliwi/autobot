@@ -85,6 +85,24 @@ class Config:
     KALI_MCP_URL = os.environ.get("KALI_MCP_URL", "http://kali:8000")
     KALI_MCP_TIMEOUT = int(os.environ.get("KALI_MCP_TIMEOUT", "120"))
 
+    # Incident autopilot. When enabled, ERROR/CRITICAL log records (and failed
+    # runs) raise an IncidentReport, a reviewer agent diagnoses it and drafts an
+    # Issue or PR. The draft waits for human approval in the dashboard before
+    # anything is opened on GitHub (see app/services/incident_service.py).
+    INCIDENT_AUTOPILOT_ENABLED = os.environ.get("INCIDENT_AUTOPILOT_ENABLED", "true").lower() in ("1", "true", "yes")
+    # Minimum severity that triggers an incident: "error" (ERROR+CRITICAL) or
+    # "critical" (CRITICAL only). WARNING is intentionally never auto-triggered.
+    INCIDENT_MIN_SEVERITY = os.environ.get("INCIDENT_MIN_SEVERITY", "error").lower()
+    # Dedup cooldown: a given error signature raises at most one incident per
+    # this many hours; further occurrences just bump the counter.
+    INCIDENT_DEDUP_COOLDOWN_HOURS = int(os.environ.get("INCIDENT_DEDUP_COOLDOWN_HOURS", "12"))
+    # Logger-name prefixes whose records never raise incidents (avoids feedback
+    # loops from the incident pipeline itself). Comma-separated.
+    INCIDENT_IGNORE_LOGGERS = os.environ.get(
+        "INCIDENT_IGNORE_LOGGERS",
+        "app.services.incident_service,app.services.github_service,app.services.review_queue_service",
+    )
+
     # Matrix
     MATRIX_HOMESERVER = os.environ.get("MATRIX_HOMESERVER", "")
     MATRIX_USER_ID = os.environ.get("MATRIX_USER_ID", "")
