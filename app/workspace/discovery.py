@@ -15,7 +15,6 @@ from app.runtime.tool_registry import get_all_definitions as get_builtin_definit
 from app.workspace.manager import (
     get_global_skills_path,
     get_global_tools_path,
-    get_workspace_path,
 )
 from app.workspace.manifest import load_manifest, validate_skill_manifest, validate_tool_manifest
 

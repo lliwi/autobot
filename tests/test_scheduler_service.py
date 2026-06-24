@@ -6,7 +6,6 @@ timezone-aware scheduling, and DST edge cases.
 
 from datetime import datetime, timezone
 
-import pytest
 
 from app.services.scheduler_service import compute_next_run
 

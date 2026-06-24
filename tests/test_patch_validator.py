@@ -1,10 +1,8 @@
 """Unit tests for app.services.patch_validator.validate_patch."""
 
-import os
 import tempfile
 from pathlib import Path
 
-import pytest
 
 from app.services.patch_validator import validate_patch
 

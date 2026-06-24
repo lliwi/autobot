@@ -7,7 +7,6 @@ Run inside the web container:
 import json
 import shutil
 import sys
-from pathlib import Path
 
 DISPATCHER_TEMPLATE = '''"""Generic {family} tool — dispatches to one of several operations.
 
@@ -72,7 +71,6 @@ def merge(new_slug, family_label, sources, description):
 
     gt = get_global_tools_path()
     new_dir = gt / new_slug
-    ops_dir = new_dir / "ops"
 
     # Build into a temp dir first so we never clobber a source mid-merge
     tmp_dir = gt / (new_slug + "__building")

@@ -6,7 +6,7 @@ apart from local time — the root of "the scheduler is in a different timezone"
 confusion. These helpers always mark the zone explicitly.
 """
 
-from datetime import datetime, timezone
+from datetime import timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 

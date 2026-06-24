@@ -1,6 +1,4 @@
 """Admin-only endpoints for promoting tools/skills to the default template."""
-import os
-from pathlib import Path
 
 from flask import jsonify, request, send_file
 

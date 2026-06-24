@@ -1,7 +1,6 @@
 import asyncio
 import logging
 import threading
-import time
 from datetime import datetime, timezone
 
 logger = logging.getLogger(__name__)
@@ -433,7 +432,7 @@ class MatrixBot:
         logger.debug("Matrix audio event from %s in %s", event.sender, room.room_id)
 
         with self.app.app_context():
-            from app.services.matrix_audio_ingest import handle_audio_event, is_audio_event
+            from app.services.matrix_audio_ingest import handle_audio_event
             from app.services.matrix_service import get_agent_for_room, is_dm_user_allowed, is_room_allowed, is_user_allowed
 
             is_dm = room.member_count <= 2
@@ -477,7 +476,6 @@ class MatrixBot:
 
     async def _handle_message(self, client, room, event):
         """Handle an incoming Matrix message."""
-        from nio import RoomSendResponse
 
         # Ignore own messages
         if event.sender == client.user_id:
@@ -777,7 +775,6 @@ def _sync_to_web_session(app, agent, matrix_room_id: str, user_msg: str, assista
     try:
         with app.app_context():
             from datetime import datetime, time, timezone
-            from app.extensions import db
             from app.models.session import Session
             from app.services.session_service import add_message, get_or_create_session
 

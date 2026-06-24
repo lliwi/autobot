@@ -10,7 +10,6 @@ the task on the floor with a bare ``error``. Instead it should:
 
 import json
 
-import pytest
 
 from app.runtime import agent_runner
 from app.services.chat_service import _resolve_outcome

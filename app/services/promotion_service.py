@@ -24,14 +24,13 @@ import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 
-from app.extensions import db
 from app.models.agent import Agent
 from app.models.patch_proposal import PatchProposal
 from app.models.skill import Skill
 from app.models.tool import Tool
 from app.services.patch_validator import validate_patch
 from app.services.promotion_secrets_scanner import findings_to_markdown, scan_directory
-from app.workspace.manager import get_template_path, get_workspace_path
+from app.workspace.manager import get_template_path
 
 logger = logging.getLogger(__name__)
 

@@ -2,7 +2,6 @@ from flask import render_template, redirect, url_for, request, flash
 from flask_login import current_user, login_required
 
 from app.dashboard import dashboard_bp
-from app.extensions import db
 from app.models.agent import Agent
 from app.services.approval_rule_service import (
     create_rule,

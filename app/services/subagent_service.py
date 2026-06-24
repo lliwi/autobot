@@ -1,13 +1,12 @@
 """Service layer for sub-agent management and task delegation."""
 
-import json
 import logging
 
 from app.extensions import db
 from app.models.agent import Agent
 from app.models.run import Run
 from app.services.agent_service import create_agent
-from app.workspace.manager import get_workspace_path, read_file, write_file
+from app.workspace.manager import read_file, write_file
 
 logger = logging.getLogger(__name__)
 

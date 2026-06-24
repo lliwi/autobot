@@ -22,6 +22,10 @@ class Run(db.Model):
     output_tokens = db.Column(db.Integer, nullable=True)
     estimated_cost = db.Column(db.Float, nullable=True)
     error_summary = db.Column(db.Text, nullable=True)
+    # Per-round timeline of the agent tool-call loop: one entry per model round
+    # with latency, token deltas and the tools it dispatched. Populated by
+    # ``agent_runner`` for observability; see ``run_log_service``.
+    rounds_trace = db.Column(db.JSON, nullable=True)
 
     # Relationships
     parent_run = db.relationship("Run", remote_side=[id], backref="child_runs")
@@ -44,4 +48,5 @@ class Run(db.Model):
             "output_tokens": self.output_tokens,
             "estimated_cost": self.estimated_cost,
             "error_summary": self.error_summary,
+            "rounds_trace": self.rounds_trace,
         }

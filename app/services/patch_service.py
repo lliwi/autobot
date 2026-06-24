@@ -4,7 +4,6 @@ Handles the full lifecycle: propose → snapshot → validate → apply/reject �
 """
 
 import difflib
-import json
 import logging
 import shutil
 from datetime import datetime, timedelta, timezone

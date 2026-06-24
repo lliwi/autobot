@@ -26,7 +26,7 @@ def main():
     # Start scheduler
     from app.worker.scheduler import init_scheduler, shutdown_scheduler
 
-    scheduler = init_scheduler(app)
+    init_scheduler(app)
 
     # Start Matrix bot
     from app.worker.matrix_adapter import MatrixBot

@@ -16,7 +16,6 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 
-from app.extensions import db
 from app.models.objective import Objective
 from app.models.run import Run
 from app.models.tool_execution import ToolExecution

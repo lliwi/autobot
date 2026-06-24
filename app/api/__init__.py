@@ -3,7 +3,7 @@ from flask import Blueprint
 api_bp = Blueprint("api", __name__)
 
 # Exempt API from CSRF (uses JSON, not forms)
-from app.extensions import csrf
+from app.extensions import csrf  # noqa: E402
 
 csrf.exempt(api_bp)
 

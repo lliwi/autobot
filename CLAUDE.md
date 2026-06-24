@@ -82,6 +82,10 @@ workspaces/
 3. **`agent_runner.run()`** — tool-call loop (up to `MAX_TOOL_ROUNDS`, default 20). Each round: model response → `tool_executor.execute()` → result capped at 20 000 chars for context → next round.
 4. **`tool_executor`** dispatches to `tool_registry` (built-in tools) or `tool_subprocess_runner` (workspace `tool.py` files executed in agent's `.venv`).
 
+`tool_registry` is a **package** (`app/runtime/tool_registry/`): `core.py` holds the registry primitives (`ToolDefinition`, `register`, `get`, `get_all_definitions`) and each domain module (`workspace_tools.py`, `selfmod_tools.py`, `schedule_tools.py`, `credential_tools.py`, `kali_tools.py`, …) owns its handlers plus a `register_<domain>()` function. `register_builtin_tools()` in `__init__.py` calls them in a fixed order (which also fixes the order tools are advertised to the model). Add a new built-in tool by registering it inside the matching domain module, not in a new file.
+
+`model_client.stream_chat_completion()` retries transient failures (429/5xx/connection errors) with exponential backoff + jitter until the stream commits; once output starts streaming a mid-stream error propagates. `agent_runner` records a per-round `rounds_trace` (model latency, token deltas, dispatched tools) and persists it to `Run.rounds_trace` via `run_service.save_round_trace`; the run-detail view (`_runs_table.html`) renders it as a timeline.
+
 Action-first enforcement: if the model responds with intent text instead of a tool call on an action-type request, an `_ENFORCE_ACTION_NUDGE` system message is injected and the round retried.
 
 ## Self-Improvement (PatchProposal)

@@ -11,7 +11,6 @@ Run inside the web container with an app context:
 import json
 import shutil
 import sys
-from pathlib import Path
 
 
 DISPATCHER_TEMPLATE = '''"""Generic {family} tool — dispatches to one of several operations.

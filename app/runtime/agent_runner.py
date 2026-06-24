@@ -1,5 +1,6 @@
 import hashlib
 import json
+import time
 
 from flask import current_app
 
@@ -174,10 +175,33 @@ def run(agent, session, user_message, run_id):
     last_tool_status = None
     low_budget_warned = False
 
+    # Per-round timeline for observability (#5). One entry per model round with
+    # its latency, token deltas and dispatched tools. Persisted in the finally
+    # block so every termination path — normal, abort, or client disconnect —
+    # leaves a trace on the Run row.
+    rounds_trace: list[dict] = []
+    model_ms = 0.0
+    round_usage = {"input_tokens": 0, "output_tokens": 0}
+    round_tool_calls: list[dict] = []
+
+    def _record_round(note=None):
+        rounds_trace.append({
+            "round": round_num + 1,
+            "model_ms": round(model_ms, 1),
+            "input_tokens": round_usage["input_tokens"],
+            "output_tokens": round_usage["output_tokens"],
+            "content_chars": len(full_response or ""),
+            "tool_calls": list(round_tool_calls),
+            "note": note,
+        })
+
     try:
         for round_num in range(max_rounds):
             full_response = ""
             tool_calls = None
+            model_ms = 0.0
+            round_usage = {"input_tokens": 0, "output_tokens": 0}
+            round_tool_calls = []
 
             # Warn the model once when only a couple of rounds remain so it can
             # wind down gracefully instead of being hard-cut mid-task.
@@ -198,6 +222,7 @@ def run(agent, session, user_message, run_id):
             # a payload that exceeds the window.
             _trim_inloop_messages(messages, budget, _fixed_len)
 
+            model_started = time.monotonic()
             try:
                 for delta_type, delta_data in stream_chat_completion(agent, messages, tools or None):
                     if delta_type == "content":
@@ -210,6 +235,8 @@ def run(agent, session, user_message, run_id):
                     elif delta_type == "usage":
                         usage_total["input_tokens"] += delta_data.get("input_tokens", 0)
                         usage_total["output_tokens"] += delta_data.get("output_tokens", 0)
+                        round_usage["input_tokens"] += delta_data.get("input_tokens", 0)
+                        round_usage["output_tokens"] += delta_data.get("output_tokens", 0)
 
                     elif delta_type == "rate_limits":
                         try:
@@ -220,8 +247,11 @@ def run(agent, session, user_message, run_id):
 
             except Exception as e:
                 current_app.logger.error(f"Model call error: {e}")
+                model_ms = (time.monotonic() - model_started) * 1000
+                _record_round(note=f"model_error: {str(e)[:120]}")
                 yield json.dumps({"type": "error", "data": str(e)})
                 return
+            model_ms = (time.monotonic() - model_started) * 1000
 
             if not tool_calls:
                 if (
@@ -244,8 +274,10 @@ def run(agent, session, user_message, run_id):
                         "agent_runner nudge: agent=%s round=%d user_task=1 promise=1",
                         agent.id, round_num,
                     )
+                    _record_round(note="action_nudge")
                     continue
                 # No tool calls — we're done
+                _record_round()
                 yield json.dumps({"type": "done", "data": full_response, "usage": usage_total})
                 return
 
@@ -280,6 +312,8 @@ def run(agent, session, user_message, run_id):
                 yield json.dumps({"type": "tool_call", "data": {"name": tool_name, "arguments": arguments}})
 
                 if repeat_signatures[signature] >= 3:
+                    round_tool_calls.append({"tool": tool_name, "status": "aborted_repeat", "ms": 0})
+                    _record_round(note="abort_repeat")
                     yield json.dumps({
                         "type": "error",
                         "data": (
@@ -289,11 +323,16 @@ def run(agent, session, user_message, run_id):
                     })
                     return
 
+                tc_started = time.monotonic()
                 result = execute_tool(run_id, agent, tool_name, arguments)
+                tc_ms = (time.monotonic() - tc_started) * 1000
                 tool_executions_count += 1
                 last_tool_name = tool_name
                 last_tool_status = (
                     "error" if isinstance(result, dict) and result.get("error") else "ok"
+                )
+                round_tool_calls.append(
+                    {"tool": tool_name, "status": last_tool_status, "ms": round(tc_ms, 1)}
                 )
 
                 yield json.dumps({"type": "tool_result", "data": {"tool": tool_name, "result": result}})
@@ -316,6 +355,7 @@ def run(agent, session, user_message, run_id):
                 result_repeat[rhash] = result_repeat.get(rhash, 0) + 1
 
                 if error_streak >= _FAILED_STREAK_ABORT:
+                    _record_round(note="abort_error_streak")
                     yield json.dumps({
                         "type": "error",
                         "data": (
@@ -325,6 +365,7 @@ def run(agent, session, user_message, run_id):
                     })
                     return
                 if result_repeat[rhash] >= _RESULT_REPEAT_ABORT:
+                    _record_round(note="abort_result_repeat")
                     yield json.dumps({
                         "type": "error",
                         "data": (
@@ -339,6 +380,9 @@ def run(agent, session, user_message, run_id):
             if error_streak >= _FAILED_STREAK_NUDGE and not loop_break_nudge_used:
                 loop_break_nudge_used = True
                 messages.append({"role": "system", "content": _LOOP_BREAK_NUDGE})
+
+            # Completed a full round of tool calls — record it before the next.
+            _record_round()
 
         # Hit the hard round cap. Rather than dropping the task on the floor,
         # give the model one final no-tool turn to synthesize a partial answer
@@ -362,6 +406,11 @@ def run(agent, session, user_message, run_id):
         messages.append({"role": "system", "content": _FINALIZE_PROMPT})
 
         final_response = ""
+        full_response = ""
+        model_ms = 0.0
+        round_usage = {"input_tokens": 0, "output_tokens": 0}
+        round_tool_calls = []
+        model_started = time.monotonic()
         try:
             for delta_type, delta_data in stream_chat_completion(agent, messages, None):
                 if delta_type == "content":
@@ -370,16 +419,22 @@ def run(agent, session, user_message, run_id):
                 elif delta_type == "usage":
                     usage_total["input_tokens"] += delta_data.get("input_tokens", 0)
                     usage_total["output_tokens"] += delta_data.get("output_tokens", 0)
+                    round_usage["input_tokens"] += delta_data.get("input_tokens", 0)
+                    round_usage["output_tokens"] += delta_data.get("output_tokens", 0)
         except Exception as e:
             # Even the summarization turn failed — fall back to a clear error so
             # the run is still recorded, now with structured context.
             current_app.logger.error("agent_runner finalization turn failed: %s", e)
+            model_ms = (time.monotonic() - model_started) * 1000
+            full_response = final_response
+            _record_round(note="max_rounds_finalize_failed")
             yield json.dumps({
                 "type": "error",
                 "data": "Maximum tool call rounds reached",
                 "meta": meta,
             })
             return
+        model_ms = (time.monotonic() - model_started) * 1000
 
         if not final_response.strip():
             final_response = (
@@ -388,6 +443,9 @@ def run(agent, session, user_message, run_id):
                 "summary. Please re-run with a narrower request to continue."
             )
 
+        full_response = final_response
+        _record_round(note="max_rounds_finalize")
+        meta["rounds"] = len(rounds_trace)
         yield json.dumps({
             "type": "done",
             "data": final_response,
@@ -399,3 +457,10 @@ def run(agent, session, user_message, run_id):
         # Runs here if the generator completes, is closed early by the
         # client disconnecting, or raises.
         forget_run_reads(run_id)
+        # Persist the per-round timeline for the run-detail view (#5). Best-effort
+        # — a trace write must never mask the real run outcome.
+        try:
+            from app.services.run_service import save_round_trace
+            save_round_trace(run_id, rounds_trace)
+        except Exception:
+            current_app.logger.exception("Failed to persist round trace for run %s", run_id)

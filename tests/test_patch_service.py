@@ -10,7 +10,6 @@ behaviour we want to assert.
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-import pytest
 
 from app.extensions import db
 from app.models.patch_proposal import PatchProposal

@@ -7,6 +7,8 @@ token, and yields deltas back in the legacy format expected by agent_runner.
 import hashlib
 import json
 import logging
+import random
+import time
 
 import httpx
 
@@ -16,6 +18,43 @@ logger = logging.getLogger(__name__)
 
 CODEX_RESPONSES_URL = "https://chatgpt.com/backend-api/codex/responses"
 DEFAULT_MODEL = "gpt-5.2"
+
+# Transient-failure handling for the model call. A tool-call loop that loses a
+# single round to a 429 or a dropped connection aborts the whole run, so we
+# retry the *connection* a few times with exponential backoff + jitter. Once the
+# server has answered 200 and we start streaming we are committed: a mid-stream
+# failure propagates (we can't un-yield already-emitted deltas).
+_MAX_RETRIES = 4
+_RETRYABLE_STATUS = {429, 500, 502, 503, 504, 529}
+_BACKOFF_BASE_SECONDS = 1.0
+_BACKOFF_CAP_SECONDS = 30.0
+_RETRY_AFTER_CAP_SECONDS = 60.0
+
+
+class _RetryableStatus(Exception):
+    """Internal signal: server returned a retryable status before any output."""
+
+    def __init__(self, status_code: int, delay: float):
+        super().__init__(f"retryable status {status_code}")
+        self.status_code = status_code
+        self.delay = delay
+
+
+def _backoff_delay(attempt: int) -> float:
+    """Exponential backoff with full jitter: random in [0, base*2**attempt]."""
+    ceiling = min(_BACKOFF_CAP_SECONDS, _BACKOFF_BASE_SECONDS * (2 ** attempt))
+    return random.uniform(0.0, ceiling)
+
+
+def _parse_retry_after(headers) -> float | None:
+    """Honor a numeric ``Retry-After`` header (seconds), capped for safety."""
+    raw = headers.get("retry-after") if headers else None
+    if not raw:
+        return None
+    try:
+        return min(float(raw), _RETRY_AFTER_CAP_SECONDS)
+    except (TypeError, ValueError):
+        return None
 
 
 def stream_chat_completion(agent, messages, tools=None):
@@ -57,19 +96,53 @@ def stream_chat_completion(agent, messages, tools=None):
         "content-type": "application/json",
     }
 
-    with httpx.stream("POST", CODEX_RESPONSES_URL, json=body, headers=headers, timeout=180.0) as response:
-        if response.status_code != 200:
-            error_body = response.read().decode("utf-8", errors="replace")[:500]
-            raise RuntimeError(f"Codex API {response.status_code}: {error_body}")
-        # Forward the subscription rate-limit headers so the runner can persist
-        # a snapshot for the metrics dashboard.
-        quota_headers = {
-            k: v for k, v in response.headers.items()
-            if isinstance(k, str) and k.lower().startswith("x-codex-")
-        }
-        if quota_headers:
-            yield ("rate_limits", quota_headers)
-        yield from _consume_sse(response)
+    attempt = 0
+    while True:
+        # ``committed`` flips once we've received a 200 and begun streaming, so
+        # the network-error handler knows it can no longer safely retry.
+        committed = False
+        try:
+            with httpx.stream(
+                "POST", CODEX_RESPONSES_URL, json=body, headers=headers, timeout=180.0
+            ) as response:
+                if response.status_code != 200:
+                    if response.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES:
+                        delay = _parse_retry_after(response.headers) or _backoff_delay(attempt)
+                        raise _RetryableStatus(response.status_code, delay)
+                    error_body = response.read().decode("utf-8", errors="replace")[:500]
+                    raise RuntimeError(f"Codex API {response.status_code}: {error_body}")
+                # Past this point we are streaming real output and cannot retry.
+                committed = True
+                # Forward the subscription rate-limit headers so the runner can
+                # persist a snapshot for the metrics dashboard.
+                quota_headers = {
+                    k: v for k, v in response.headers.items()
+                    if isinstance(k, str) and k.lower().startswith("x-codex-")
+                }
+                if quota_headers:
+                    yield ("rate_limits", quota_headers)
+                yield from _consume_sse(response)
+            return
+        except _RetryableStatus as r:
+            attempt += 1
+            logger.warning(
+                "Codex API %s — retry %d/%d in %.1fs",
+                r.status_code, attempt, _MAX_RETRIES, r.delay,
+            )
+            time.sleep(r.delay)
+            continue
+        except httpx.TransportError as e:
+            # Connection/read errors. Only safe to retry if nothing was emitted.
+            if committed or attempt >= _MAX_RETRIES:
+                raise RuntimeError(f"Codex request failed: {e}") from e
+            attempt += 1
+            delay = _backoff_delay(attempt - 1)
+            logger.warning(
+                "Codex transport error (%s) — retry %d/%d in %.1fs",
+                type(e).__name__, attempt, _MAX_RETRIES, delay,
+            )
+            time.sleep(delay)
+            continue
 
 
 def _consume_sse(response):

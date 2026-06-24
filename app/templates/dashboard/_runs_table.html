@@ -17,6 +17,38 @@
     <div class="error-box">{{ r.error_summary }}</div>
     {% endif %}
 
+    {% if detail.rounds_trace %}
+    <h2 style="margin-top:0.75rem;">Round timeline ({{ detail.rounds_trace | length }})</h2>
+    <table class="round-trace">
+        <thead>
+            <tr>
+                <th>#</th>
+                <th>Model</th>
+                <th>Tokens (in/out)</th>
+                <th>Reply</th>
+                <th>Tool calls</th>
+                <th>Note</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for rt in detail.rounds_trace %}
+            <tr>
+                <td>{{ rt.round }}</td>
+                <td>{{ '%.0f'|format(rt.model_ms or 0) }} ms</td>
+                <td>{{ rt.input_tokens or 0 }}/{{ rt.output_tokens or 0 }}</td>
+                <td>{{ rt.content_chars or 0 }} ch</td>
+                <td>
+                    {% for tc in rt.tool_calls %}
+                    <span class="round-tool round-tool-{{ 'error' if tc.status == 'error' else 'ok' }}">{{ tc.tool }} · {{ '%.0f'|format(tc.ms or 0) }}ms</span>
+                    {% else %}—{% endfor %}
+                </td>
+                <td>{% if rt.note %}<code>{{ rt.note }}</code>{% endif %}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endif %}
+
     {% if detail.tool_executions %}
     <h2 style="margin-top:0.75rem;">Tool calls ({{ detail.tool_executions | length }})</h2>
     {% for e in detail.tool_executions %}

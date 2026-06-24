@@ -63,6 +63,7 @@ def run_detail(run_id, requesting_agent_id=None, scope="own"):
     return {
         "run": summarize_run(run),
         "tool_executions": [summarize_execution(e) for e in execs],
+        "rounds_trace": run.rounds_trace or [],
     }
 
 

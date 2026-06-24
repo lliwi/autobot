@@ -38,6 +38,22 @@ def create_run(agent_id, session_id, trigger_type="message"):
     return run
 
 
+def save_round_trace(run_id, rounds_trace):
+    """Persist the per-round timeline emitted by ``agent_runner``.
+
+    Called from the runner's ``finally`` block so every termination path (normal
+    finish, early abort, client disconnect) records what rounds ran. Best-effort
+    and isolated from ``finish_run`` so a trace write never blocks finalization.
+    """
+    if not rounds_trace:
+        return
+    run = db.session.get(Run, run_id)
+    if run is None:
+        return
+    run.rounds_trace = rounds_trace
+    db.session.commit()
+
+
 def finish_run(run_id, status="completed", input_tokens=None, output_tokens=None, error_summary=None):
     run = db.session.get(Run, run_id)
     if run is None:

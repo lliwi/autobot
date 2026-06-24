@@ -3,13 +3,13 @@ import logging
 import re
 from datetime import datetime, timezone
 
-logger = logging.getLogger(__name__)
-
 from app.extensions import db
 from app.models.agent import Agent
 from app.models.skill import AgentSkill, Skill
 from app.workspace.discovery import sync_global_skills_to_db
 from app.workspace.manager import get_global_skills_path
+
+logger = logging.getLogger(__name__)
 
 
 def _slugify(name):
