@@ -102,11 +102,12 @@ def _build_snapshot(agent: Agent) -> dict:
     due_objectives = []
     for o in objectives:
         ctx = o.context_json or {}
+        next_check_at = _as_aware_utc(o.next_check_at)
         due_objectives.append({
             "id": o.id,
             "title": o.title,
             "status": o.status,
-            "due": (o.next_check_at is None) or (o.next_check_at <= now),
+            "due": (next_check_at is None) or (next_check_at <= now),
             "last_progress_at": o.last_progress_at.isoformat() if o.last_progress_at else None,
             "no_progress_count": int(ctx.get("heartbeat_no_progress", 0)),
         })
