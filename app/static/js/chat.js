@@ -81,15 +81,24 @@ document.addEventListener('DOMContentLoaded', () => {
     let currentAgentName = '';
     let contextBudget = null;
     let abortController = null;
+    // Follow-up tasks the agent queued via inline steering; auto-run after the turn.
+    let pendingFollowups = [];
+    // Remember the idle placeholder so streaming can swap it and restore it.
+    messageInput.dataset.idlePlaceholder = messageInput.getAttribute('placeholder') || 'Message';
 
     function setStreamingUI(isStreaming) {
         streaming = isStreaming;
-        sendBtn.hidden = isStreaming;
+        // Inline steering: keep the input + send usable while the agent works so
+        // the user can add notes or queue tasks mid-run. Stop stays available too.
+        sendBtn.hidden = false;
         stopBtn.hidden = !isStreaming;
-        sendBtn.disabled = isStreaming;
-        messageInput.disabled = isStreaming;
-        attachBtn.disabled = isStreaming;
+        sendBtn.disabled = false;
+        messageInput.disabled = false;
+        attachBtn.disabled = isStreaming;  // attachments only start a fresh turn
         if (newChatBtn) newChatBtn.disabled = isStreaming;
+        messageInput.placeholder = isStreaming
+            ? 'Agent is working… type to steer it or queue a task'
+            : (messageInput.dataset.idlePlaceholder || 'Message');
     }
 
     function formatTokens(n) {
@@ -231,34 +240,13 @@ document.addEventListener('DOMContentLoaded', () => {
         onAgentChange();
     }
 
-    chatForm.addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const rawText = messageInput.value.trim();
-        if (streaming || !agentSelect.value || (!rawText && !attachedFile)) return;
-
-        // Build the full message: optional file block + user text
-        let message = rawText;
-        const fileSnapshot = attachedFile;
-        if (fileSnapshot) {
-            const ext = fileSnapshot.name.split('.').pop() || '';
-            const fence = `\`\`\`${ext}`;
-            const fileBlock = `[Attached: ${fileSnapshot.name}]\n${fence}\n${fileSnapshot.content}\n\`\`\``;
-            message = rawText ? `${fileBlock}\n\n${rawText}` : fileBlock;
-        }
-
-        messageInput.value = '';
-        clearAttachment();
-
+    // Run one full turn: stream the agent's reply, then auto-run any queued
+    // follow-ups the agent created via inline steering.
+    async function runTurn(message, displayText) {
         if (messagesDiv.querySelector('.empty-state')) {
             messagesDiv.innerHTML = '';
         }
-
-        // Display user bubble: show filename badge + text separately for readability
-        const displayText = fileSnapshot
-            ? (rawText ? `📎 ${fileSnapshot.name}\n\n${rawText}` : `📎 ${fileSnapshot.name}`)
-            : message;
         appendMessage('user', displayText);
-
         setStreamingUI(true);
 
         const assistantDiv = appendMessage('assistant', '', labelFor('assistant'));
@@ -306,9 +294,6 @@ document.addEventListener('DOMContentLoaded', () => {
             if (err.name === 'AbortError') {
                 contentSpan.textContent += '\n\n[stopped]';
             } else {
-                // Network/connection error — the backend may have finished and
-                // saved its response even though the stream was interrupted.
-                // Show a friendly notice and try to recover from session history.
                 const isNetworkErr = err.message === 'Load failed' ||
                     err.message === 'Failed to fetch' ||
                     err.message === 'NetworkError when attempting to fetch resource.';
@@ -318,7 +303,6 @@ document.addEventListener('DOMContentLoaded', () => {
                         '\n\n*Connection interrupted — checking if the response was saved…*';
                     contentSpan.innerHTML = renderMarkdown(contentSpan.dataset.raw);
                     scrollToBottom();
-                    // Wait briefly then check session history for a saved reply.
                     await _recoverFromSession(assistantDiv, contentSpan);
                 } else {
                     contentSpan.textContent += `\n[Error: ${err.message}]`;
@@ -331,6 +315,69 @@ document.addEventListener('DOMContentLoaded', () => {
         setStreamingUI(false);
         messageInput.focus();
         scrollToBottom();
+
+        // Drain follow-ups the agent queued during this turn, one at a time.
+        if (pendingFollowups.length) {
+            const next = pendingFollowups.shift();
+            appendMessage('tool', '▶ Running queued follow-up');
+            await runTurn(next, next);
+        }
+    }
+
+    // Inline steering: deliver a message to the agent mid-run. Falls back to a
+    // fresh turn if the run finished between keystrokes.
+    async function sendSteer(message, displayText) {
+        appendMessage('user', '↪ ' + displayText);
+        scrollToBottom();
+        try {
+            const res = await fetch('/api/chat/steer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ session_id: sessionId, message })
+            });
+            const out = await res.json().catch(() => ({}));
+            if (out && out.active === false) {
+                await runTurn(message, displayText);
+            } else if (out && out.queued) {
+                appendMessage('tool', '↪ Delivered — the agent will consider this on its next step.');
+            } else {
+                appendMessage('tool', '↪ Could not deliver the message.');
+            }
+        } catch (e) {
+            appendMessage('tool', '↪ Could not deliver the message.');
+        }
+        messageInput.focus();
+        scrollToBottom();
+    }
+
+    chatForm.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const rawText = messageInput.value.trim();
+        if (!agentSelect.value || (!rawText && !attachedFile)) return;
+
+        // Attachments only start a fresh turn, not a mid-run steer.
+        const fileSnapshot = streaming ? null : attachedFile;
+        let message = rawText;
+        if (fileSnapshot) {
+            const ext = fileSnapshot.name.split('.').pop() || '';
+            const fence = `\`\`\`${ext}`;
+            const fileBlock = `[Attached: ${fileSnapshot.name}]\n${fence}\n${fileSnapshot.content}\n\`\`\``;
+            message = rawText ? `${fileBlock}\n\n${rawText}` : fileBlock;
+        }
+        if (!message) return;
+
+        messageInput.value = '';
+        if (!streaming) clearAttachment();
+
+        const displayText = fileSnapshot
+            ? (rawText ? `📎 ${fileSnapshot.name}\n\n${rawText}` : `📎 ${fileSnapshot.name}`)
+            : message;
+
+        if (streaming && sessionId) {
+            await sendSteer(message, displayText);
+        } else {
+            await runTurn(message, displayText);
+        }
     });
 
     stopBtn.addEventListener('click', () => {
@@ -403,6 +450,16 @@ document.addEventListener('DOMContentLoaded', () => {
                     ? JSON.stringify(chunk.data.result, null, 2)
                     : String(chunk.data.result);
                 appendMessage('tool', `Result from ${chunk.data.tool}:\n${resultText}`);
+                break;
+
+            case 'steer_applied':
+                appendMessage('tool', `↪ Agent received your note: ${chunk.data}`);
+                break;
+
+            case 'followups':
+                if (Array.isArray(chunk.data)) {
+                    pendingFollowups.push(...chunk.data);
+                }
                 break;
 
             case 'error':

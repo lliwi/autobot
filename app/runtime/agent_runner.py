@@ -92,6 +92,48 @@ _LOOP_BREAK_NUDGE = (
 )
 
 
+# Injected ahead of mid-task user interjections (inline steering). Tells the
+# model the message arrived WHILE it was working and to decide how to handle it
+# rather than blindly dropping its current line of work.
+_STEER_NOTE = (
+    "SYSTEM: The user sent the following message(s) while you were still working"
+    " on the current task. Read them and DECIDE:\n"
+    " (a) if they refine or correct the current task, fold them into what you are"
+    " doing now;\n"
+    " (b) if they are a separate task to do right after this one, call"
+    " `queue_followup` with that task and keep going;\n"
+    " (c) if they are a long-running background goal, call `create_objective`.\n"
+    "Briefly acknowledge what you decided, then continue. Do not abandon"
+    " already-completed work."
+)
+
+
+def _drain_steering(session, messages, run_id):
+    """Pull pending interjections for this run's session into the live messages.
+
+    Returns the list of injected message strings (empty if none). Best-effort:
+    a steering hiccup must never break the run.
+    """
+    if session is None:
+        return []
+    try:
+        from app.services.steering_service import drain_interjections
+        pending = drain_interjections(session.id)
+    except Exception:
+        return []
+    if not pending:
+        return []
+    messages.append({"role": "system", "content": _STEER_NOTE})
+    for msg in pending:
+        messages.append({"role": "user", "content": msg})
+        try:
+            from app.services.session_service import add_message
+            add_message(session.id, role="user", content=msg)
+        except Exception:
+            pass
+    return pending
+
+
 def _trim_inloop_messages(messages: list, budget: int, fixed_len: int) -> list:
     """Drop oldest agentic round pairs to keep the running context under budget.
 
@@ -202,6 +244,12 @@ def run(agent, session, user_message, run_id):
             model_ms = 0.0
             round_usage = {"input_tokens": 0, "output_tokens": 0}
             round_tool_calls = []
+
+            # Inline steering: fold any mid-task user messages into the loop
+            # before this round's model call so the agent reacts to them now.
+            injected = _drain_steering(session, messages, run_id)
+            for msg in injected:
+                yield json.dumps({"type": "steer_applied", "data": msg})
 
             # Warn the model once when only a couple of rounds remain so it can
             # wind down gracefully instead of being hard-cut mid-task.
@@ -464,3 +512,12 @@ def run(agent, session, user_message, run_id):
             save_round_trace(run_id, rounds_trace)
         except Exception:
             current_app.logger.exception("Failed to persist round trace for run %s", run_id)
+        # Steering messages that landed after the final round would otherwise be
+        # lost — re-queue them as follow-ups so the next turn still sees them.
+        if session is not None:
+            try:
+                from app.services.steering_service import drain_interjections, queue_followup
+                for leftover in drain_interjections(session.id):
+                    queue_followup(session.id, leftover)
+            except Exception:
+                pass

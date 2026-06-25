@@ -98,6 +98,16 @@ Security levels gate what agents can self-modify:
 
 All proposals go through `patch_service` → `patch_validator` (JSON/AST/handler/smoke-import checks) → optional `review_service` (sub-agent reviewer) → `apply_patch` / `rollback_patch`.
 
+## Inline Steering (talk to an agent mid-task)
+
+While a run is streaming, the user can keep typing in the web chat. Each message is delivered to the **live** run instead of starting a new one:
+
+- **Detect**: `POST /api/chat/steer` (`session_id`, `message`). If a run is `running` for that session, the message is pushed to a per-session Redis inbox (`steering_service.push_interjection`); otherwise it returns `active:false` and the client sends a normal turn.
+- **Inject**: `agent_runner.run()` calls `_drain_steering()` at the **start of every tool-call round** — it appends a system note + the user message(s) into the live `messages`, persists them to history, and emits a `steer_applied` chunk. Latency = the in-flight round/tool-call.
+- **Decide**: the agent folds the input into the current task, or — for a separate task — calls `queue_followup` (immediate follow-up turn in the same session) or `create_objective` (background goal). Queued follow-ups are surfaced on a `followups` SSE chunk after the run finishes; `chat.js` auto-runs them sequentially. Interjections that arrive after the final round are re-queued as follow-ups so they're never lost.
+
+All steering state is in Redis and best-effort — a steering hiccup never breaks the run it steers.
+
 ## Incident Autopilot
 
 When an `ERROR`/`CRITICAL` log record is emitted (any process) or a `Run` finishes with `status=error`, an incident is raised and processed automatically: **detect → diagnose → draft Issue/PR → human approval → open on GitHub**.

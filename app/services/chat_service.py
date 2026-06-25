@@ -172,6 +172,16 @@ def stream_response(agent_id, message, session_id=None):
     )
     _close_chat_objective(objective_id, succeeded=not error, error_summary=error_summary)
 
+    # Inline steering: surface any follow-up tasks the agent queued (or
+    # interjections that arrived too late) so the client can auto-run them next.
+    try:
+        from app.services.steering_service import pop_followups
+        followups = pop_followups(session.id)
+        if followups:
+            yield json.dumps({"type": "followups", "data": followups})
+    except Exception:
+        current_app.logger.debug("could not emit followups", exc_info=True)
+
 
 def run_agent_non_streaming(agent_id, message, session_id=None, channel_type="web",
                             trigger_type="message", external_chat_id=None, external_user_id=None):

@@ -30,6 +30,7 @@ from app.runtime.tool_registry.matrix_tools import register_matrix_tools
 from app.runtime.tool_registry.package_tools import register_package_tools
 from app.runtime.tool_registry.schedule_tools import register_schedule_tools
 from app.runtime.tool_registry.selfmod_tools import register_selfmod_tools
+from app.runtime.tool_registry.steering_tools import register_steering_tools
 from app.runtime.tool_registry.web_tools import register_web_tools
 from app.runtime.tool_registry.workspace_tools import forget_run_reads, register_workspace_tools
 
@@ -49,6 +50,7 @@ def register_builtin_tools():
     register_workspace_tools()
     register_delegation_tools()
     register_selfmod_tools()
+    register_steering_tools()
     register_learning_tools()
     register_web_tools()
     register_introspection_tools()

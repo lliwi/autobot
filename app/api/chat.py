@@ -70,6 +70,31 @@ def chat():
     )
 
 
+@api_bp.route("/chat/steer", methods=["POST"])
+@auth_required
+@limiter.limit("60 per minute")
+def chat_steer():
+    """Inject a message into a running agent (inline steering).
+
+    If a run is currently executing for the session, the message is queued for
+    the agent to pick up at its next round. If no run is active, returns
+    ``active=false`` so the client falls back to starting a normal turn.
+    """
+    data = request.get_json() or {}
+    session_id = data.get("session_id")
+    message = (data.get("message") or "").strip()
+    if not session_id or not message:
+        return jsonify(error="session_id and message required"), 400
+
+    from app.services.steering_service import has_active_run, push_interjection
+
+    if not has_active_run(session_id):
+        return jsonify(active=False)
+    if not push_interjection(session_id, message):
+        return jsonify(active=True, queued=False, error="could not queue message"), 503
+    return jsonify(active=True, queued=True)
+
+
 @api_bp.route("/chat/history")
 @auth_required
 def chat_history():
