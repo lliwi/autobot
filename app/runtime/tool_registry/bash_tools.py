@@ -15,7 +15,7 @@ def register_bash_tools():
                 "(optionally a subdirectory via `workdir`). The agent's per-workspace "
                 "venv, if one exists, is prepended to PATH so packages installed through "
                 "`install_package` are importable. Provide EITHER `command` (one-liner "
-                "evaluated with `bash -lc`) OR `script` (multi-line bash body, wrapped "
+                "evaluated with `bash -c`) OR `script` (multi-line bash body, wrapped "
                 "with `set -euo pipefail`). Output is truncated to ~20k characters."
             ),
             parameters={
@@ -52,6 +52,11 @@ def _run_bash(_agent=None, _run_id=None, command=None, script=None,
     has cwd pinned inside ``workspace_path``. We also prepend the per-workspace
     venv's bin dir to PATH when present so the agent can call packages it
     installed via ``install_package`` without activating the venv by hand.
+
+    One-line commands intentionally use ``bash -c`` instead of ``bash -lc``.
+    A login shell may reinitialize PATH from profile files and drop the venv
+    prefix, which makes ``python`` resolve to the system interpreter even when
+    ``venv_active`` is true.
     """
     import os
     import subprocess
@@ -118,7 +123,7 @@ def _run_bash(_agent=None, _run_id=None, command=None, script=None,
             os.chmod(temp_path, 0o700)
             argv = ["bash", temp_path]
         else:
-            argv = ["bash", "-lc", command]
+            argv = ["bash", "-c", command]
 
         proc = subprocess.run(
             argv,
