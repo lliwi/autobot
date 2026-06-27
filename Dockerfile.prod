@@ -1,0 +1,33 @@
+FROM python:3.11-slim
+
+WORKDIR /app
+
+# Runtime system deps only — same rationale as Dockerfile.dev (no compiler, all
+# Python deps ship manylinux wheels). git is kept for promotion PRs and bundles.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git ca-certificates && \
+    rm -rf /var/lib/apt/lists/* && \
+    git config --global --add safe.directory /app
+
+# Python deps first so this layer is cached across source-only changes. We
+# install WITHOUT the [dev] extras (no pytest/ruff in production) but keep the
+# editable install so the dependency layer is reused; the real source is baked
+# in by the COPY below and, unlike dev, is NOT bind-mounted at runtime.
+COPY pyproject.toml .
+RUN mkdir -p app && touch app/__init__.py && \
+    pip install --no-cache-dir -e .
+
+# Source is baked into the image. In production there is no bind mount over
+# /app, so a file write inside the container can never trigger a reload — the
+# class of bug that cut in-flight SSE chat streams under `flask run --debug`.
+COPY . .
+
+ENV FLASK_APP=wsgi.py
+ENV FLASK_ENV=production
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 5000
+
+# Production WSGI server. Config (worker class, timeouts) lives in
+# gunicorn.conf.py so it can be tuned without rebuilding.
+CMD ["gunicorn", "-c", "gunicorn.conf.py", "wsgi:app"]

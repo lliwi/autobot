@@ -27,6 +27,7 @@ backups/
 kali/
 
 docker-compose.yml
+docker-compose.prod.yml
 
 .claude/
 CLAUDE.md
