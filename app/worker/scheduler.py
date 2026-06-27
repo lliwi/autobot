@@ -16,6 +16,19 @@ _scheduler = None
 # the root cause of weekly tasks being skipped.
 _job_signatures: dict[str, str] = {}
 
+# IDs of the long-lived internal jobs registered in ``init_scheduler``. They are
+# not backed by a DB row, so ``_sync_jobs`` must treat them as expected and never
+# prune them. Forgetting to list a job here makes _sync_jobs delete it on the
+# first 30s tick — which is exactly how the incident-autopilot drain silently
+# stopped running (incidents piled up in ``new`` and were never diagnosed). Any
+# ``add_job`` added below MUST have its id here.
+_INTERNAL_JOB_IDS = {
+    "__sync_jobs",
+    "__drain_review_queue",
+    "__scan_errors",
+    "__drain_incidents",
+}
+
 
 def init_scheduler(app):
     global _scheduler
@@ -161,7 +174,7 @@ def _sync_jobs(app):
 
         # Remove jobs for disabled/deleted tasks. One-off drive-to-completion
         # continuation jobs (heartbeat_drive_*) are transient — leave them alone.
-        expected_ids = heartbeat_job_ids | cron_job_ids | {"__sync_jobs", "__drain_review_queue", "__scan_errors"}
+        expected_ids = heartbeat_job_ids | cron_job_ids | _INTERNAL_JOB_IDS
         for job in _scheduler.get_jobs():
             if job.id not in expected_ids and not job.id.startswith("heartbeat_drive_"):
                 logger.info(f"Removing stale job: {job.id}")

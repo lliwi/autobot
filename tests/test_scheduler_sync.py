@@ -71,3 +71,30 @@ class TestEnsureJob:
         _ensure(signature="cron:0 8 * * 1:Europe/Madrid")
         job.reschedule.assert_called_once()
         assert scheduler._job_signatures["cron_1"] == "cron:0 8 * * 1:Europe/Madrid"
+
+
+class TestInternalJobsProtected:
+    """``_sync_jobs`` prunes any job not in ``expected_ids``. The long-lived
+    internal jobs aren't backed by a DB row, so every one registered in
+    ``init_scheduler`` must be in ``_INTERNAL_JOB_IDS`` or it gets removed on the
+    first 30s tick — the bug that silently stopped the incident-autopilot drain
+    (incidents stuck in ``new``, never diagnosed).
+    """
+
+    def test_drain_incidents_is_protected(self):
+        assert "__drain_incidents" in scheduler._INTERNAL_JOB_IDS
+
+    def test_every_registered_internal_job_is_protected(self, monkeypatch):
+        # Run init_scheduler against a fake scheduler so we capture exactly which
+        # internal ("__"-prefixed) jobs it registers, then assert the protected
+        # set matches — guarding the whole class, not just one job id.
+        fake = _FakeScheduler()
+        fake.start = lambda *a, **k: None
+        monkeypatch.setattr(scheduler, "BackgroundScheduler", lambda *a, **k: fake)
+        monkeypatch.setattr(scheduler, "_sync_jobs", lambda app: None)
+        monkeypatch.setattr(scheduler, "_scheduler", None)
+
+        scheduler.init_scheduler(MagicMock())
+
+        registered_internal = {jid for jid in fake.added if jid.startswith("__")}
+        assert registered_internal == scheduler._INTERNAL_JOB_IDS

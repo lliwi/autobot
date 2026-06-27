@@ -32,3 +32,4 @@ docker-compose.prod.yml
 .claude/
 CLAUDE.md
 diagnostics/
+autobot-diagnostics-*.tar.gz
