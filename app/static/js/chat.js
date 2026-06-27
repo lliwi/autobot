@@ -294,7 +294,15 @@ document.addEventListener('DOMContentLoaded', () => {
             if (err.name === 'AbortError') {
                 contentSpan.textContent += '\n\n[stopped]';
             } else {
-                const isNetworkErr = err.message === 'Load failed' ||
+                // Every fetch/stream failure surfaces as a TypeError: connection
+                // refused / DNS before the body, and — crucially — a stream cut
+                // mid-response by a proxy or the server. Chrome reports the
+                // mid-stream case as "network error", Chrome/Firefox/Safari each
+                // word the pre-body case differently. Match on the type so a
+                // mid-stream disconnect still triggers session recovery instead
+                // of dumping a raw "[Error: network error]" and losing the reply.
+                const isNetworkErr = err instanceof TypeError ||
+                    err.message === 'Load failed' ||
                     err.message === 'Failed to fetch' ||
                     err.message === 'NetworkError when attempting to fetch resource.';
 
