@@ -806,6 +806,44 @@ Todos los registros de web y worker se envían a una lista Redis
 logger, mensaje, y auto-refresh cada 5 s. Útil para ver en un solo timeline
 qué hizo el scheduler, el Matrix adapter y el runtime del agente.
 
+### Export de diagnósticos (Incidents, Reviewer, Logs)
+
+Para depurar errores fuera de línea (o pasárselos a un asistente) hay un script
+que empaqueta en un único `.tar.gz` el estado operativo: incidencias del
+autopilot, cola del reviewer y los logs. Lee la base de datos y el ring de Redis
+desde dentro de un contenedor en marcha — **no requiere reconstruir la imagen**.
+
+```bash
+# Stack de producción, últimos 7 días (por defecto)
+scripts/export-diagnostics.sh
+
+# Ventana mayor (0 = todo el histórico)
+scripts/export-diagnostics.sh --days 30
+
+# Contra el stack de desarrollo/pruebas
+scripts/export-diagnostics.sh --dev
+
+# Ejecutar dentro del worker en vez de web, o limitar filas/logs
+scripts/export-diagnostics.sh --service worker --limit 500 --log-limit 1000
+```
+
+Genera `diagnostics/autobot-diagnostics-<timestamp>.tar.gz` con:
+
+| Fichero | Fuente | Contenido |
+|---|---|---|
+| `incidents.json` | `IncidentReport` | incidencias del autopilot (detección → diagnóstico → acción propuesta) |
+| `reviewer.json` | `ReviewEvent` | cola del reviewer con `summary`, `findings_json` y errores |
+| `runs.json` | `Run` | los runs referenciados por incidencias/reviews (rastro real: `rounds_trace`, `error_summary`) |
+| `logs_ring.json` | Redis `autobot:logs` | logs estructurados recientes (web + worker), filtrables por nivel |
+| `container-web.log` / `container-worker.log` | `docker compose logs` | stdout crudo de los contenedores (complementa el ring, que se trunca y se pierde al reiniciar Redis) |
+| `manifest.json` | — | contadores, filtros aplicados y fecha de generación |
+
+El bundle puede contener **datos sensibles** (mensajes de log, tracebacks,
+salida de los agentes). La carpeta `diagnostics/` está en `.gitignore`; trata el
+tarball con cuidado al compartirlo.
+
+Detalle de flags: `scripts/export-diagnostics.sh --help`.
+
 ## Roadmap
 
 - [x] **Fase 1 — Núcleo**: Flask, PostgreSQL, auth, chat SSE, runtime, workspace, Codex OAuth (PKCE CLI)
@@ -820,6 +858,7 @@ qué hizo el scheduler, el Matrix adapter y el runtime del agente.
 - [x] **Portabilidad**: `flask export-bundle` / `flask import-bundle` para clonar una instalación entera
 - [x] **Promoción a plantilla**: tools y skills probadas en producción se promueven a `workspaces/_template/` vía bundle descargable o PR automático en GitHub (`gh_token` desde credenciales cifradas o env); broadcast opcional a todos los agentes existentes
 - [x] **Logs centralizados**: ring buffer Redis compartido web+worker, vista `Observability → Logs` con filtros + auto-refresh
+- [x] **Export de diagnósticos**: `scripts/export-diagnostics.sh` empaqueta incidencias, cola del reviewer, runs referenciados y logs (ring Redis + stdout de contenedores) en un `.tar.gz` portable para depuración offline
 - [x] **Límites diarios por agente**: `daily_token_budget` (tokens) y `daily_cost_budget` (USD) configurables por agente desde el dashboard; freno automático al inicio de cada run cuando se supera el cap del día UTC (`agent_budget_service`)
 - [x] **Auditoría firmada de patches**: cadena SHA-256 en `patch_proposals` — cada patch almacena `content_hash` y `previous_hash` enlazando con el anterior; `patch_audit_service.verify_chain()` detecta cualquier manipulación retrospectiva
 - [x] **Métricas de coste**: panel en Metrics con coste estimado (USD) por día y por agente, tarjeta resumen con total del período y coste de hoy; alerta visual configurable via `COST_ALERT_EUR_DAILY`
