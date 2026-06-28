@@ -46,6 +46,33 @@ def test_ingest_dedups_by_signature(app):
     assert IncidentReport.query.count() == 1
 
 
+def test_quota_incident_is_classified_and_suppressed(app):
+    # A Codex usage-limit error is recorded but auto-resolved: no GitHub draft,
+    # no reviewer round. It must NOT sit in the actionable "new" queue.
+    inc = incident_service.ingest(
+        severity="error", source="run:1005",
+        message="Codex usage limit reached (plus plan). (resets at 2026-06-28T18:00:06+00:00; in ~2h 12m)",
+    )
+    assert inc.status == "dismissed"
+    assert inc.proposed_action == "none"
+    assert inc.source == "codex:quota"
+    assert "quota" in (inc.diagnosis or "").lower()
+
+
+def test_quota_incidents_dedup_across_different_runs(app):
+    # The default source is "run:<id>", which would give every failed run a
+    # unique signature. Quota incidents must collapse into ONE regardless of run.
+    a = incident_service.ingest(severity="error", source="run:1005",
+                                message="Codex usage limit reached (plus plan). (in ~2h 12m)")
+    b = incident_service.ingest(severity="error", source="run:1006",
+                                message="Codex usage limit reached (plus plan). (in ~1h 58m)")
+    assert b.id == a.id
+    assert b.occurrences == 2
+    assert IncidentReport.query.count() == 1
+    # The freshest reset time stays visible.
+    assert "1h 58m" in b.message
+
+
 def test_diagnose_drafts_pr_from_reviewer(app, reviewer, monkeypatch):
     inc = incident_service.ingest(severity="error", source="svc", message="KeyError: 'x'")
 

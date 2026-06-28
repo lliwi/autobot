@@ -118,6 +118,53 @@ def test_retries_transport_error_then_succeeds(patched_auth, monkeypatch):
     assert ("content", "hi") in deltas
 
 
+_USAGE_LIMIT_BODY = (
+    b'{"error":{"type":"usage_limit_reached",'
+    b'"message":"The usage limit has been reached",'
+    b'"plan_type":"plus","resets_at":1782561606,"resets_in_seconds":7964}}'
+)
+
+
+def test_usage_limit_429_fails_fast_without_retry(patched_auth, monkeypatch):
+    # A quota 429 won't clear within the request (reset is hours away), so it
+    # must raise immediately on the FIRST attempt — no retry storm.
+    calls = {"n": 0}
+
+    def fake_stream(method, url, **kwargs):
+        calls["n"] += 1
+        return _FakeStreamCM(_FakeResponse(429, body=_USAGE_LIMIT_BODY))
+
+    monkeypatch.setattr(mc.httpx, "stream", fake_stream)
+    with pytest.raises(mc.UsageLimitReached) as ei:
+        list(mc.stream_chat_completion(_agent(), [{"role": "user", "content": "hi"}]))
+
+    assert calls["n"] == 1  # not retried
+    err = ei.value
+    assert err.plan_type == "plus"
+    assert err.resets_in_seconds == 7964
+    assert err.resets_at == 1782561606
+
+
+def test_usage_limit_message_is_human_friendly(patched_auth):
+    err = mc.UsageLimitReached(plan_type="plus", resets_at=1782561606,
+                               resets_in_seconds=7964, message="The usage limit has been reached")
+    s = str(err)
+    assert s.startswith("Codex usage limit reached")
+    assert "plus plan" in s
+    # Reset info surfaced for operators; no raw JSON dump.
+    assert "resets at" in s and "{" not in s
+
+
+def test_plain_text_usage_limit_is_detected(patched_auth, monkeypatch):
+    # Some gateways return a non-JSON 429 body that only contains the marker.
+    def fake_stream(method, url, **kwargs):
+        return _FakeStreamCM(_FakeResponse(429, body=b"429 usage_limit_reached"))
+
+    monkeypatch.setattr(mc.httpx, "stream", fake_stream)
+    with pytest.raises(mc.UsageLimitReached):
+        list(mc.stream_chat_completion(_agent(), [{"role": "user", "content": "hi"}]))
+
+
 def test_honors_retry_after_header(patched_auth, monkeypatch):
     slept = []
     monkeypatch.setattr(mc.time, "sleep", lambda s: slept.append(s))

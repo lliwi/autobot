@@ -119,6 +119,63 @@ def drain_queue(max_items: int = 20) -> int:
     return process_new(max_items=max_items)
 
 
+def _is_quota_message(text: str | None) -> bool:
+    """True for a Codex usage-limit (quota) exhaustion error."""
+    t = (text or "").lower()
+    return "usage limit reached" in t or "usage_limit_reached" in t
+
+
+def _ingest_quota(message, agent_id) -> IncidentReport:
+    """Record a Codex usage-limit incident without engaging the autopilot.
+
+    Quota exhaustion is an external condition, not a code defect: every
+    occurrence collapses into ONE incident via a stable signature (independent
+    of the run id, unlike the default ``run:<id>`` source), and the incident is
+    closed immediately — no reviewer round (which would itself hit the exhausted
+    quota) and no GitHub Issue/PR draft. The reset time stays visible in the
+    message for operators.
+    """
+    sig = signature_for("codex-usage-limit", "codex:quota")
+    cooldown_h = int(current_app.config.get("INCIDENT_DEDUP_COOLDOWN_HOURS", 12))
+    cutoff = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=cooldown_h)
+    existing = (
+        IncidentReport.query
+        .filter(IncidentReport.signature == sig)
+        .filter(IncidentReport.created_at >= cutoff)
+        .order_by(IncidentReport.id.desc())
+        .first()
+    )
+    if existing is not None:
+        existing.occurrences = (existing.occurrences or 1) + 1
+        existing.last_seen_at = datetime.now(timezone.utc)
+        existing.message = message  # keep the freshest reset time visible
+        db.session.commit()
+        return existing
+
+    incident = IncidentReport(
+        agent_id=agent_id,
+        signature=sig,
+        severity="error",
+        source="codex:quota",
+        title="Codex usage limit reached (quota)",
+        message=message,
+        status="dismissed",
+        proposed_action="none",
+        occurrences=1,
+        last_seen_at=datetime.now(timezone.utc),
+        diagnosis=(
+            "External Codex usage-limit (quota) exhaustion — not a code defect. "
+            "No remediation; clears automatically when the plan quota resets. "
+            "See the message for the reset time."
+        ),
+        resolution_note="Auto-classified as quota exhaustion; no GitHub action taken.",
+    )
+    db.session.add(incident)
+    db.session.commit()
+    logger.info("incident (quota) recorded id=%s — suppressed from autopilot", incident.id)
+    return incident
+
+
 def ingest(*, severity, source, message, title=None, traceback=None,
            agent_id=None, signature=None) -> IncidentReport | None:
     """Create or bump an IncidentReport. DB-level dedup within the cooldown.
@@ -126,6 +183,9 @@ def ingest(*, severity, source, message, title=None, traceback=None,
     Returns the (possibly newly created) row, or the bumped existing one.
     ``title`` defaults to the first line of ``message``.
     """
+    if _is_quota_message(message) or _is_quota_message(title):
+        return _ingest_quota(message, agent_id)
+
     title = (title or (message or "").strip().splitlines()[0] if (message or "").strip() else None) or "(incident)"
     sig = signature or signature_for(message, source)
     cooldown_h = int(current_app.config.get("INCIDENT_DEDUP_COOLDOWN_HOURS", 12))

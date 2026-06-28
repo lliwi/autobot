@@ -9,6 +9,7 @@ import json
 import logging
 import random
 import time
+from datetime import datetime, timezone
 
 import httpx
 
@@ -38,6 +39,67 @@ class _RetryableStatus(Exception):
         super().__init__(f"retryable status {status_code}")
         self.status_code = status_code
         self.delay = delay
+
+
+class UsageLimitReached(RuntimeError):
+    """Codex subscription quota exhausted (HTTP 429 ``usage_limit_reached``).
+
+    Distinct from a transient 429: the reset is typically minutes-to-hours away,
+    so retrying within the request is pointless. Carries the reset metadata and a
+    human-friendly str() ("Codex usage limit reached (plus plan). (resets at …)")
+    so callers can surface it instead of dumping the raw API JSON. Incident-level
+    dedup is handled separately by a stable signature in ``incident_service``.
+    """
+
+    def __init__(self, *, plan_type=None, resets_at=None, resets_in_seconds=None,
+                 message=None):
+        self.plan_type = plan_type
+        self.resets_at = resets_at
+        self.resets_in_seconds = resets_in_seconds
+        self.api_message = message
+        super().__init__(self._format())
+
+    def _format(self) -> str:
+        plan = f" ({self.plan_type} plan)" if self.plan_type else ""
+        parts = []
+        try:
+            if self.resets_at:
+                ts = datetime.fromtimestamp(int(self.resets_at), tz=timezone.utc)
+                parts.append(f"resets at {ts.isoformat()}")
+        except (TypeError, ValueError, OSError, OverflowError):
+            pass
+        try:
+            if self.resets_in_seconds:
+                secs = int(self.resets_in_seconds)
+                h, m = secs // 3600, (secs % 3600) // 60
+                parts.append(f"in ~{h}h {m}m" if h else f"in ~{m}m")
+        except (TypeError, ValueError):
+            pass
+        when = f" ({'; '.join(parts)})" if parts else ""
+        return f"Codex usage limit reached{plan}.{when}"
+
+
+def _parse_usage_limit(status_code: int, body_text: str):
+    """Return reset metadata when ``body_text`` is a Codex usage-limit 429.
+
+    Handles both the JSON error envelope and a plain-text body that merely
+    contains the ``usage_limit_reached`` marker. Returns ``None`` otherwise.
+    """
+    if status_code != 429 or "usage_limit_reached" not in (body_text or ""):
+        return None
+    err = {}
+    try:
+        data = json.loads(body_text)
+        err = data.get("error") if isinstance(data, dict) else {}
+        err = err if isinstance(err, dict) else {}
+    except (ValueError, TypeError):
+        err = {}
+    return {
+        "plan_type": err.get("plan_type"),
+        "resets_at": err.get("resets_at"),
+        "resets_in_seconds": err.get("resets_in_seconds"),
+        "message": err.get("message"),
+    }
 
 
 def _backoff_delay(attempt: int) -> float:
@@ -106,11 +168,23 @@ def stream_chat_completion(agent, messages, tools=None):
                 "POST", CODEX_RESPONSES_URL, json=body, headers=headers, timeout=180.0
             ) as response:
                 if response.status_code != 200:
+                    error_body = response.read().decode("utf-8", errors="replace")[:2000]
+                    # Usage-limit (quota) 429s won't clear within the request —
+                    # the reset is minutes-to-hours away. Fail fast with a clear,
+                    # operator-friendly message instead of retry-storming a quota
+                    # that cannot recover in time.
+                    quota = _parse_usage_limit(response.status_code, error_body)
+                    if quota is not None:
+                        info = UsageLimitReached(**quota)
+                        logger.warning(
+                            "Codex usage limit reached (plan=%s resets_in=%ss) — not retrying",
+                            quota.get("plan_type"), quota.get("resets_in_seconds"),
+                        )
+                        raise info
                     if response.status_code in _RETRYABLE_STATUS and attempt < _MAX_RETRIES:
                         delay = _parse_retry_after(response.headers) or _backoff_delay(attempt)
                         raise _RetryableStatus(response.status_code, delay)
-                    error_body = response.read().decode("utf-8", errors="replace")[:500]
-                    raise RuntimeError(f"Codex API {response.status_code}: {error_body}")
+                    raise RuntimeError(f"Codex API {response.status_code}: {error_body[:500]}")
                 # Past this point we are streaming real output and cannot retry.
                 committed = True
                 # Forward the subscription rate-limit headers so the runner can
