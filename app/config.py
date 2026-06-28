@@ -176,7 +176,12 @@ class TestingConfig(Config):
 
 class ProductionConfig(Config):
     DEBUG = False
-    SESSION_COOKIE_SECURE = True
+    # Secure cookies are only sent over HTTPS. Default on for real deployments,
+    # but overridable: when serving over plain HTTP on a trusted LAN (e.g. a
+    # macvlan IP with no TLS) the browser would otherwise drop the session
+    # cookie, so login fails with "The CSRF session token is missing" before the
+    # MFA step. Set SESSION_COOKIE_SECURE=false in the environment for that case.
+    SESSION_COOKIE_SECURE = os.environ.get("SESSION_COOKIE_SECURE", "true").lower() in ("1", "true", "yes")
 
 
 config = {
