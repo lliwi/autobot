@@ -15,8 +15,7 @@ RUN apt-get update && \
         wpscan \
         whatweb \
         enum4linux \
-        ca-certificates && \
-    rm -rf /var/lib/apt/lists/*
+        ca-certificates
 
 # Patch server.py: CommandExecutor.execute() raises ValueError for list commands
 # and also tries to shlex.split() a list (dead code). Both lines must go so that
